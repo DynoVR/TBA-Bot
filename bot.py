@@ -82,11 +82,17 @@ def verify_user(user_id_str, username="Unknown"):
             "losses": 0
         }
 
+def is_staff():
+    async def predicate(ctx):
+        return any(role.name == STAFF_ROLE_NAME for role in ctx.author.roles)
+    return commands.check(predicate)
+
 # --- Bot Setup Initializer ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 # ==============================================================================
 # --- CARD CREATION AND MANAGEMENT MODULES ---
 # ==============================================================================
@@ -113,6 +119,7 @@ async def addcard(ctx, player: discord.Member, rarity: str, overall: int, image_
         "overall": max(1, min(overall, 99)),  # Lock range between 1-99
         "image_url": image_url or ""
     }
+
     
     save_data()
     await ctx.send(f"✅ Successfully created card profile for **{player.display_name}**! [{rarity} | {overall} OVR]")
