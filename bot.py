@@ -943,4 +943,8 @@ async def configureroles(ctx, queue_role: discord.Role, match_role: discord.Role
     save_data()
     await ctx.send(f"⚙️ Configurations Setup Success: Queue tracking mapped to {queue_role.name} and Active Match tracking mapped to {match_role.name}.")
 
+# --- Start Services ---
+keep_alive()
+bot.run(TOKEN)
+
 
