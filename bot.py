@@ -879,7 +879,7 @@ async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
 
-    # 2. Open Filter: Listen to NeatQueue ID, Bot accounts, or Webhooks
+    # 2. Open Gate: Listen to webhooks, bots, or accounts containing "neat"
     is_neatque = "neat" in message.author.name.lower()
     is_webhook = message.webhook_id is not None
     is_bot = message.author.bot
@@ -887,49 +887,29 @@ async def on_message(message: discord.Message):
     if is_neatque or is_webhook or is_bot or message.author.id == 857633321064595466:
         text_to_scan = ""
         
-        # Layer A: Extract standard message text strings
+        # Gather text content from standard text streams
         if message.content:
             text_to_scan += message.content + "\n"
             
-        # Layer B: Extract text nested inside colorful embed layouts
+        # Gather text layers from hidden embed matrix cards
         if message.embeds:
             for embed in message.embeds:
                 if embed.title: text_to_scan += embed.title + "\n"
                 if embed.description: text_to_scan += embed.description + "\n"
                 for field in embed.fields: text_to_scan += f" {field.name} {field.value} \n"
 
-        # 🚨 Layer C: VISUAL IMAGE PARSER NODES
-        # If NeatQueue uploads a scorecard screenshot or attachment image file, pull the metadata
-        if message.attachments:
-            for attachment in message.attachments:
-                if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                    try:
-                        # Download the raw image asset bytes into temporary script memory
-                        image_bytes = await attachment.read()
-                        image_file = Image.open(io.BytesIO(image_bytes))
-                        
-                        # Extract hidden image profile strings, alt text, or file tag notes
-                        if hasattr(image_file, 'info') and image_file.info:
-                            for key, val in image_file.info.items():
-                                text_to_scan += f" {key} {str(val)} \n"
-                    except Exception as e:
-                        print(f"🖼️ Image read buffer fault: {e}")
-
-        clean_text_payload = text_to_scan.lower()
-
-        # Gatekeeper: Exit early if this isn't an official match scorecard message
-        if "winner" not in clean_text_payload:
+        # Gatekeeper Check: Exit early if this isn't a final scoreboard log
+        if "winner" not in text_to_scan.lower():
             return
 
         winning_user_ids = []
         losing_user_ids = []
 
-        # 🎯 EXPLICIT SIDE-BY-SIDE COLUMN MENTION AND TEXT SEARCH ENGINE
-        # Matches user mention tags directly linked to their +/- results
+        # 🎯 STEREOSCOPIC MENTION ID SCANNER
         winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
         losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
 
-        # Fallback String Parser: Connect nickname characters if native tags are missing
+        # Fallback Name Extractor Node (Handles plain text names if mentions break)
         if not winners_found and not losers_found:
             for line in text_to_scan.split("\n"):
                 if "+" in line:
@@ -946,7 +926,7 @@ async def on_message(message: discord.Message):
             winning_user_ids = winners_found
             losing_user_ids = losers_found
 
-        # 3. Process coin rewards allocations inside database records folders
+        # 3. Process records modifications onto valid found identities
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -963,18 +943,19 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Push authorized backup saves permanently to GitHub repository folders
+            # Commit adjustments immediately to the permanent GitHub cloud save
             save_data()
 
+            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Automated Link Synced!** Card ledger statistics updated successfully.\n"
+                    f"🪙 **NeatQue Dynamic Link Synced!** Detected final scorecard inside private arena room.\n"
                     f"The following match winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
 
+    # Keep prefix commands responsive
     await bot.process_commands(message)
-
 
 # --- Start Services ---
 keep_alive()
