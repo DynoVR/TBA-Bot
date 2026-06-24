@@ -873,40 +873,46 @@ async def on_message(message: discord.Message):
         winning_user_ids = []
         losing_user_ids = []
 
-        # 🚨 FIX: Force the bot to download and cache the live server member list!
-        # Without this line, message.guild.members returns 0 accounts, breaking name matching.
+        # Force the bot to download and cache the live server member list!
         if message.guild:
             try:
-                await message.guild.query_members(limit=100, cache=True)
+                await message.guild.query_members(limit=250, cache=True)
             except Exception as e:
                 print(f"Member chunking fault: {e}")
 
-        # 🎯 ADVANCED CLEAN NAME PARSER
-        # Splitting the text by line to inspect exactly who got a + or a -
+        # ADVANCED CLEAN NAME PARSER
         for line in text_to_scan.split("\n"):
             line = line.strip()
             if not line:
                 continue
 
-            # Check if this line indicates a stats change
             has_plus = "+" in line
             has_minus = "-" in line
             
             if not has_plus and not has_minus:
                 continue
 
-            # Clean out common symbols, numbers in parentheses, and the trailing point metrics
-            # Example text conversion: "@Tent💍🐗 +40.0 (33.7)" -> "@Tent💍🐗"
-            clean_line = re.sub(r"\([^\)]+\)", "", line)  # Removes everything inside parenthetical bounds (...)
-            clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  # Removes the points flag change (+35.3, -17.0, etc.)
-            clean_line = clean_line.replace("@", "").strip()  # Clears out the literal symbol prefix text
+            # Clean out common symbols, numbers in parentheses, and trailing scores
+            clean_line = re.sub(r"\([^\)]+\)", "", line)  
+            clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  
+            clean_line = clean_line.replace("@", "").strip()  
 
-            if not clean_line:
+            if not clean_line or len(clean_line) < 2:
                 continue
 
-            # Match the cleaned plain text string directly to the freshly downloaded server member cache
+            # 🎯 FIXED: PARTIAL USER MATCHING ALGORITHM
+            # If an exact match fails, find any user whose name or display nickname contains the clean string text
             member = discord.utils.get(message.guild.members, display_name=clean_line) or \
                      discord.utils.get(message.guild.members, name=clean_line)
+                     
+            if not member and message.guild:
+                search_text = clean_line.lower()
+                for m in message.guild.members:
+                    m_display = m.display_name.lower()
+                    m_name = m.name.lower()
+                    if search_text in m_display or search_text in m_name:
+                        member = m
+                        break
             
             if member:
                 p_id_str = str(member.id)
@@ -917,7 +923,7 @@ async def on_message(message: discord.Message):
 
         # 3. Award the matching users inside your league database ledger
         if winning_user_ids or losing_user_ids:
-            reward = DATA["config"].get("match_reward", 25)
+            reward = DATA["config"].get("match_reward", 50)
             awarded_mentions = []
 
             for p_id in winning_user_ids:
@@ -943,6 +949,7 @@ async def on_message(message: discord.Message):
                 )
 
     await bot.process_commands(message)
+
 
 
 # --- Start Services ---
