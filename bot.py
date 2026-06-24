@@ -35,7 +35,7 @@ DATABASE_FILE = "card_league_database.json"
 
 # --- GitHub Auto-Sync Save System Configurations ---
 GITHUB_USERNAME = "DynoVR"
-GITHUB_REPO = "hockey-bot"
+GITHUB_REPO = "TBA-Bot"
 GITHUB_FILE_PATH = "card_league_database.json"
 GH_TOKEN = os.environ.get("GH_TOKEN")
 
@@ -863,95 +863,96 @@ async def setupqueue(ctx, format_size: int):
 # --- NEATQUE RESULT SCRAPER EVENT LISTENER ---
 # ==============================================================================
 
+
 @bot.event
 async def on_message(message: discord.Message):
-    # 1. Ignore messages sent by your own bot to prevent loops
+    # 1. Ignore messages sent by your own bot to prevent feedback loops
     if message.author == bot.user:
         return
 
-    # 2. Universal Sender Filter: Run if the username is 'NeatQue', if it is a Webhook, OR matches the App ID
-    is_neatque = "neatque" in message.author.name.lower()
+    # 2. Match if sender name contains NeatQueue, is a Webhook, or is a Bot
+    is_neatque = "neat" in message.author.name.lower()
     is_webhook = message.webhook_id is not None
     is_bot = message.author.bot
 
     if is_neatque or is_webhook or is_bot or message.author.id == 857633321064595466:
         text_to_scan = ""
         
-        # Scrape raw text content
         if message.content:
             text_to_scan += message.content + "\n"
             
-        # Scrape EVERY string layer inside a Discord Embed Box (including Webhook layers)
         if message.embeds:
             for embed in message.embeds:
                 if embed.title:
                     text_to_scan += embed.title + "\n"
                 if embed.description:
                     text_to_scan += embed.description + "\n"
-                if embed.author and embed.author.name:
-                    text_to_scan += embed.author.name + "\n"
-                if embed.footer and embed.footer.text:
-                    text_to_scan += embed.footer.text + "\n"
                 for field in embed.fields:
-                    text_to_scan += f"{field.name} {field.value}\n"
+                    text_to_scan += f" {field.name} {field.value} \n"
 
-        # 🚨 Gatekeeper Check: Exit early if this isn't a final match results scorecard
+        # Gatekeeper Check: Exit early if this isn't a final match results scorecard
         if "winner" not in text_to_scan.lower():
             return
 
         winning_user_ids = []
         losing_user_ids = []
 
-        # Download and cache live server member names
+        # Download and update server member cache tables instantly
         if message.guild:
             try:
                 await message.guild.query_members(limit=250, cache=True)
             except Exception as e:
                 print(f"Member cache fault: {e}")
 
-        # ADVANCED TEXT EXTRACTOR
-        for line in text_to_scan.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
+        # 🎯 FIX: EXPLICIT SIDE-BY-SIDE COLUMN TEXT PARSER
+        # Pattern 1: Matches any text starting with @ up to a (+) indicator
+        # Example text: "@Dyno +31.2" -> extracts "Dyno"
+        winners_found = re.findall(r"@([^+\-\n]+)\s*\+[\d\.]+", text_to_scan)
+        
+        # Pattern 2: Matches any text starting with @ up to a (-) indicator
+        # Example text: "@packa69.co 💍 🏆 -14.8" -> extracts "packa69.co 💍 🏆"
+        losers_found = re.findall(r"@([^+\-\n]+)\s*\-[\d\.]+", text_to_scan)
 
-            has_plus = "+" in line
-            has_minus = "-" in line
+        # Connect extracted winner text names to real member profile accounts
+        for name_str in winners_found:
+            clean_name = name_str.strip()
+            # Strip extra spaces or trailing artifacts out of the search target
+            clean_name = re.sub(r"\s+", " ", clean_name)
             
-            if not has_plus and not has_minus:
-                continue
-
-            # Clean symbols, parentheticals, and extra point logs
-            # "@Dyno +35.3 (454.9)" -> "Dyno"
-            clean_line = re.sub(r"\([^\)]+\)", "", line)  
-            clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  
-            clean_line = clean_line.replace("@", "").strip()  
-
-            if not clean_line or len(clean_line) < 2:
-                continue
-
-            # Check for members matching the cleaned string text string
-            member = discord.utils.get(message.guild.members, display_name=clean_line) or \
-                     discord.utils.get(message.guild.members, name=clean_line)
+            member = discord.utils.get(message.guild.members, display_name=clean_name) or \
+                     discord.utils.get(message.guild.members, name=clean_name)
                      
-            # Sub-string check for truncated nicknames (e.g. "Dyno" matching "DynoVR")
             if not member and message.guild:
-                search_text = clean_line.lower()
+                search_text = clean_line.lower() if 'clean_line' in locals() else clean_name.lower()
                 for m in message.guild.members:
-                    m_display = m.display_name.lower()
-                    m_name = m.name.lower()
-                    if search_text in m_display or search_text in m_name:
+                    if search_text in m.display_name.lower() or search_text in m.name.lower():
                         member = m
                         break
-            
             if member:
                 p_id_str = str(member.id)
-                if has_plus and p_id_str not in winning_user_ids:
+                if p_id_str not in winning_user_ids:
                     winning_user_ids.append(p_id_str)
-                elif has_minus and p_id_str not in losing_user_ids:
+
+        # Connect extracted loser text names to real member profile accounts
+        for name_str in losers_found:
+            clean_name = name_str.strip()
+            clean_name = re.sub(r"\s+", " ", clean_name)
+            
+            member = discord.utils.get(message.guild.members, display_name=clean_name) or \
+                     discord.utils.get(message.guild.members, name=clean_name)
+                     
+            if not member and message.guild:
+                search_text = clean_name.lower()
+                for m in message.guild.members:
+                    if search_text in m.display_name.lower() or search_text in m.name.lower():
+                        member = m
+                        break
+            if member:
+                p_id_str = str(member.id)
+                if p_id_str not in losing_user_ids:
                     losing_user_ids.append(p_id_str)
 
-        # 3. Update balances inside the database
+        # 3. Apply rewards data values onto valid players found inside the registries
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -968,12 +969,12 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Save data securely to GitHub cloud files
+            # Save balances permanently back to GitHub repository files
             save_data()
 
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Automated Link Synced!** Match result parsed successfully.\n"
+                    f"🪙 **NeatQue Automated Link Synced!** Match column data processed.\n"
                     f"The following winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
