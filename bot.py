@@ -872,61 +872,81 @@ async def setupqueue(ctx, format_size: int):
 # ==============================================================================
 # --- NEATQUE RESULT SCRAPER EVENT LISTENER ---
 # ==============================================================================
+# ==============================================================================
+# --- FINAL UNIVERSAL NEATQUEUE MULTI-LAYER SCRAPER ENGINE ---
+# ==============================================================================
 
 @bot.event
 async def on_message(message: discord.Message):
-    # 1. Ignore messages sent by your own bot to prevent loops
+    # 1. Prevent loop traps
     if message.author == bot.user:
         return
 
-    # 2. Open Gate: Listen to webhooks, bots, or accounts containing "neat"
-    is_neatque = "neat" in message.author.name.lower()
-    is_webhook = message.webhook_id is not None
-    is_bot = message.author.bot
+    # 2. Open gate check for NeatQueue, webhooks, or bots
+    is_neat = "neat" in message.author.name.lower() or message.author.id == 857633321064595466
+    is_external = message.webhook_id is not None or message.author.bot
 
-    if is_neatque or is_webhook or is_bot or message.author.id == 857633321064595466:
+    if is_neat or is_external:
         text_to_scan = ""
         
-        # Gather text content from standard text streams
         if message.content:
             text_to_scan += message.content + "\n"
             
-        # Gather text layers from hidden embed matrix cards
+        # Deep matrix scan across ALL possible hidden string pockets inside NeatQueue's template layout
         if message.embeds:
             for embed in message.embeds:
-                if embed.title: text_to_scan += embed.title + "\n"
-                if embed.description: text_to_scan += embed.description + "\n"
-                for field in embed.fields: text_to_scan += f" {field.name} {field.value} \n"
+                if embed.title: 
+                    text_to_scan += f" [TITLE] {embed.title}\n"
+                if embed.description: 
+                    text_to_scan += f" [DESC] {embed.description}\n"
+                if embed.author and embed.author.name:
+                    text_to_scan += f" [AUTH] {embed.author.name}\n"
+                if embed.footer and embed.footer.text:
+                    text_to_scan += f" [FOOT] {embed.footer.text}\n"
+                for field in embed.fields:
+                    text_to_scan += f" [FIELD_NAME] {field.name} [FIELD_VALUE] {field.value}\n"
 
-        # Gatekeeper Check: Exit early if this isn't a final scoreboard log
-        if "winner" not in text_to_scan.lower():
+        clean_text_payload = text_to_scan.lower()
+
+        # Gatekeeper: Halt if this isn't an official winning summary report
+        if "winner" not in clean_text_payload and "queue" not in clean_text_payload:
             return
 
         winning_user_ids = []
         losing_user_ids = []
 
-        # 🎯 STEREOSCOPIC MENTION ID SCANNER
+        # Download and compile live server name cache tables instantly
+        if message.guild:
+            try:
+                await message.guild.query_members(limit=250, cache=True)
+            except Exception as e:
+                print(f"Member cache fault: {e}")
+
+        # ADVANCED STEREOSCOPIC ID EXTRACTOR
+        # Captures underlying Discord account number keys (<@12345678>) directly out of horizontal string lines
         winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
         losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
 
-        # Fallback Name Extractor Node (Handles plain text names if mentions break)
+        # FALLBACK: Plain character string parser if NeatQueue prints usernames instead of mentions
         if not winners_found and not losers_found:
             for line in text_to_scan.split("\n"):
                 if "+" in line:
                     plain_win = re.findall(r"@([^+\-\n\s\(]+)", line)
                     for name in plain_win:
                         member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
-                        if member: winning_user_ids.append(str(member.id))
+                        if member: 
+                            winning_user_ids.append(str(member.id))
                 elif "-" in line:
                     plain_loss = re.findall(r"@([^+\-\n\s\(]+)", line)
                     for name in plain_loss:
                         member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
-                        if member: losing_user_ids.append(str(member.id))
+                        if member: 
+                            losing_user_ids.append(str(member.id))
         else:
             winning_user_ids = winners_found
             losing_user_ids = losers_found
 
-        # 3. Process records modifications onto valid found identities
+        # 3. Apply database ledger rewards deposits
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -943,19 +963,21 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Commit adjustments immediately to the permanent GitHub cloud save
+            # Save balances back permanently to GitHub cloud storage
             save_data()
 
-            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Dynamic Link Synced!** Detected final scorecard inside private arena room.\n"
-                    f"The following match winners have been credited with **{reward} coins**: "
+                    f"🪙 **NeatQueue Automated Link Synced!** Match column data processed.\n"
+                    f"The following winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
 
-    # Keep prefix commands responsive
     await bot.process_commands(message)
+
+# --- Start Services ---
+keep_alive()
+bot.run(TOKEN)
 
 # --- Start Services ---
 keep_alive()
