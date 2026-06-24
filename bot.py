@@ -6,15 +6,18 @@ import io
 import json
 import random
 import threading
+import requests
+import base64
 from datetime import datetime, timedelta
 from flask import Flask
 
 # --- Flask Keep-Alive Web Server ---
+# Optimized to send a tiny 2-character payload so cron-job.org never errors out
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "🏒 Hockey Card & Match Queue System Online!"
+    return "OK", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -29,6 +32,12 @@ def keep_alive():
 TOKEN = os.environ.get("DISCORD_TOKEN")
 STAFF_ROLE_NAME = "Staff"
 DATABASE_FILE = "card_league_database.json"
+
+# --- GitHub Auto-Sync Save System Configurations ---
+GITHUB_USERNAME = "DynoVR"
+GITHUB_REPO = "hockey-bot"
+GITHUB_FILE_PATH = "card_league_database.json"
+GH_TOKEN = os.environ.get("GH_TOKEN")
 
 # Ordered priority mapping for sorted card ledger structures
 RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
@@ -75,19 +84,16 @@ GH_TOKEN = os.environ.get("GH_TOKEN")
 
 def save_data():
     """Saves data locally and automatically syncs it back to your GitHub Repo permanently."""
-    # 1. Save data locally first
     try:
         with open(DATABASE_FILE, "w") as f:
             json.dump(DATA, f, indent=4)
     except Exception as e:
         print(f"Local Save Error: {e}")
 
-    # 2. Skip GitHub sync if the token configuration isn't set up yet
     if not GH_TOKEN:
         print("⚠️ Warning: GH_TOKEN missing in Render Environment. Data saved ONLY locally (Volatile).")
         return
 
-    # 3. Use GitHub API to push the JSON file directly back to your repository
     try:
         url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
         headers = {
@@ -95,11 +101,9 @@ def save_data():
             "Accept": "application/vnd.github.v3+json"
         }
         
-        # Get the current file's 'sha' tag (required by GitHub to update an existing file)
         get_req = requests.get(url, headers=headers)
         sha = get_req.json().get("sha") if get_req.status_code == 200 else None
         
-        # Format the upload payload structures
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
         
@@ -110,10 +114,8 @@ def save_data():
         if sha:
             payload["sha"] = sha
             
-        # Execute the commit update action
         put_req = requests.put(url, headers=headers, json=payload)
-        if put_req.status_code == 200 or put_req.status_code == 201:
-
+        if put_req.status_code in (200, 201):
             print("💾 Database securely backed up to GitHub Repository successfully!")
         else:
             print(f"GitHub Sync Failed: {put_req.text}")
@@ -121,7 +123,7 @@ def save_data():
     except Exception as e:
         print(f"GitHub Remote Cloud Sync Fault: {e}")
 
-
+# --- ADD THESE CRITICAL MISSING DATA BLOCK MANAGERS BACK IN ---
 def load_data():
     global DATA
     if os.path.exists(DATABASE_FILE):
