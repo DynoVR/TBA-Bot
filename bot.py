@@ -190,20 +190,126 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 bot.remove_command("help")
 
+from discord.ext import tasks
+
+# Track processed message IDs so players never receive duplicate coin payouts
+if "processed_neatque_matches" not in DATA:
+    DATA["processed_neatque_matches"] = []
+
+# ==============================================================================
+# --- AUTOMATED BACKGROUND AUDIT SEARCH ENGINE ---
+# ==============================================================================
+
+@tasks.loop(seconds=30)
+async def automatic_neatque_scanner():
+    """Background Task: Actively polls server channels to auto-reward match winners."""
+    await bot.wait_until_ready()
+    
+    for guild in bot.guilds:
+        try:
+            await guild.chunk(cache=True)
+        except:
+            pass
+            
+        for channel in guild.text_channels:
+            channel_name = channel.name.lower()
+            
+            # Target channels created by queue loops (e.g. #queue-123, #match-456, #active-queue)
+            if "queue" in channel_name or "match" in channel_name or "game" in channel_name:
+                try:
+                    # Scan the last 15 messages posted in that channel arena
+                    async for message in channel.history(limit=15):
+                        if str(message.id) in DATA["processed_neatque_matches"]:
+                            continue
+                            
+                        is_neat = "neat" in message.author.name.lower() or message.author.id == 857633321064595466
+                        is_webhook = message.webhook_id is not None
+                        is_bot = message.author.bot
+                        
+                        if is_neat or is_webhook or is_bot:
+                            text_to_scan = ""
+                            if message.content:
+                                text_to_scan += message.content + "\n"
+                            if message.embeds:
+                                for embed in message.embeds:
+                                    if embed.title: text_to_scan += embed.title + "\n"
+                                    if embed.description: text_to_scan += embed.description + "\n"
+                                    for field in embed.fields: text_to_scan += f" {field.name} {field.value} \n"
+                                    
+                            if "winner" not in text_to_scan.lower():
+                                continue
+                                
+                            winning_user_ids = []
+                            losing_user_ids = []
+                            
+                            winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
+                            losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
+                            
+                            if not winners_found and not losers_found:
+                                for line in text_to_scan.split("\n"):
+                                    if "+" in line:
+                                        plain_win = re.findall(r"@([^+\-\n\s\(]+)", line)
+                                        for name in plain_win:
+                                            m = discord.utils.get(guild.members, display_name=name) or discord.utils.get(guild.members, name=name)
+                                            if m: winning_user_ids.append(str(m.id))
+                                    elif "-" in line:
+                                        plain_loss = re.findall(r"@([^+\-\n\s\(]+)", line)
+                                        for name in plain_loss:
+                                            m = discord.utils.get(guild.members, display_name=name) or discord.utils.get(guild.members, name=name)
+                                            if m: losing_user_ids.append(str(m.id))
+                            else:
+                                winning_user_ids = winners_found
+                                losing_user_ids = losers_found
+                                
+                            if winning_user_ids or losing_user_ids:
+                                reward = DATA["config"].get("match_reward", 25)
+                                awarded_mentions = []
+                                
+                                for p_id in winning_user_ids:
+                                    p_str = str(p_id)
+                                    verify_user(p_str, f"User {p_str}")
+                                    DATA["users"][p_str]["coins"] += reward
+                                    DATA["users"][p_str]["wins"] += 1
+                                    awarded_mentions.append(f"<@{p_str}>")
+                                    
+                                for p_id in losing_user_ids:
+                                    p_str = str(p_id)
+                                    verify_user(p_str, f"User {p_str}")
+                                    DATA["users"][p_str]["losses"] += 1
+                                    
+                                DATA["processed_neatque_matches"].append(str(message.id))
+                                save_data()
+                                
+                                if awarded_mentions:
+                                    await channel.send(
+                                        f"🪙 **NeatQueue Auto-Automation Active!** Scanned match scorecard.\n"
+                                        f"The following winners have been automatically credited with **{reward} coins**: "
+                                        f"{', '.join(awarded_mentions)}"
+                                    )
+                except Exception as e:
+                    pass
+
+
+# ==============================================================================
+# --- BOT INITIALIZER AND EVENT HOOKS ---
+# ==============================================================================
+
 @bot.event
 async def on_ready():
     load_data()
     keep_alive()
     print(f"🏒 Bot Online: Connected as {bot.user}")
     
-    # 🚨 FIX: Cache all server members once on startup to prevent command timeouts
-    print("👥 Fetching and caching server member directory matrices...")
-    for guild in bot.guilds:
-        try:
-            await guild.chunk(cache=True)
-            print(f"✅ Cached members for guild: {guild.name}")
-        except Exception as e:
-            print(f"⚠️ Guild chunking skipped for {guild.name}: {e}")
+    if not automatic_neatque_scanner.is_running():
+        automatic_neatque_scanner.start()
+        print("🚀 Automated Background Match Scanner Started (30s Interval Loop Active).")
+        
+    try:
+        await bot.tree.sync()
+        print("🔄 Slash commands linked.")
+    except Exception as e:
+        print(f"Sync Error: {e}")
+
             
     try:
         await bot.tree.sync()
