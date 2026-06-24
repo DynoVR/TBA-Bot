@@ -199,10 +199,13 @@ if "processed_neatque_matches" not in DATA:
 # ==============================================================================
 # --- AUTOMATED BACKGROUND AUDIT SEARCH ENGINE ---
 # ==============================================================================
+# ==============================================================================
+# --- AUTOMATED BACKGROUND TEXT MATRIX SCANNER (EXPLICIT CHANNELS) ---
+# ==============================================================================
 
 @tasks.loop(seconds=30)
 async def automatic_neatque_scanner():
-    """Background Task: Actively processes text and columns inside match rooms only when matches conclude."""
+    """Background Task: Actively processes text and columns inside explicit NeatQue result rooms."""
     await bot.wait_until_ready()
     
     for guild in bot.guilds:
@@ -214,8 +217,15 @@ async def automatic_neatque_scanner():
         for channel in guild.text_channels:
             channel_name = channel.name.lower()
             
-            # Target channels created by queue loops (e.g. #queue-123, #match-456, #active-queue)
-            if "queue" in channel_name or "match" in channel_name or "game" in channel_name:
+            # 🎯 FIXED: Direct target filter matching your exact Discord channel names
+            is_target_channel = (
+                "ranked-que" in channel_name or 
+                "ranked-1s" in channel_name or
+                "queue" in channel_name or 
+                "match" in channel_name
+            )
+            
+            if is_target_channel:
                 try:
                     # Scan the last 15 messages posted in that channel arena
                     async for message in channel.history(limit=15):
@@ -240,20 +250,18 @@ async def automatic_neatque_scanner():
 
                             clean_text_payload = text_to_scan.lower()
 
-                            # 🚨 FIX: SKIP PRE-MATCH TRAFFIC AND TIMEOUT MESSAGES
-                            # If NeatQueue is just showing potential gains or active players, skip it.
-                            # We ONLY want the final message that announces the absolute winner.
+                            # Strict check: Must announce a final winner, skip the lobby waiting queues
                             if "winner" not in clean_text_payload or "potential" in clean_text_payload:
                                 continue
 
                             winning_user_ids = []
                             losing_user_ids = []
                             
-                            # 🎯 STEREOSCOPIC ID EXTRACTOR
+                            # Extract native account identifiers out of the horizontal column tracks
                             winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
                             losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
                             
-                            # 🎯 REINFORCED LINE-BY-LINE NICKNAME FALLBACK
+                            # String Nickname Match Fallback
                             if not winners_found and not losers_found:
                                 for line in text_to_scan.split("\n"):
                                     line = line.strip()
@@ -290,7 +298,6 @@ async def automatic_neatque_scanner():
                                 winning_user_ids = winners_found
                                 losing_user_ids = losers_found
                                 
-                            # 3. Apply database ledger rewards deposits
                             if winning_user_ids or losing_user_ids:
                                 reward = DATA["config"].get("match_reward", 25)
                                 awarded_mentions = []
@@ -318,6 +325,7 @@ async def automatic_neatque_scanner():
                                     )
                 except Exception as e:
                     pass
+
 
 # ==============================================================================
 # --- BOT INITIALIZER AND EVENT HOOKS ---
