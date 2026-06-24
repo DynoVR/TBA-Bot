@@ -26,7 +26,7 @@ def keep_alive():
     t.start()
 
 # --- Configuration & Security ---
-TOKEN = "MTUxOTIyNTQxNTg1ODc4NjM3NA.GoGCIf.zGFZKNrTY1tD1QmslHsmoL_96KKMsDJEC34ISg"  # Keep safe in private repo
+TOKEN = os.environ.get("DISCORD_TOKEN")
 STAFF_ROLE_NAME = "Staff"
 DATABASE_FILE = "card_league_database.json"
 
