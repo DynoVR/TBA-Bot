@@ -714,36 +714,91 @@ async def trade(ctx, target_player: discord.Member, your_card: discord.Member, t
 # --- MATCH ENGINE STACK AND QUEUE SYSTEM ---
 # ==============================================================================
 
+# ==============================================================================
+# --- COMPETITIVE MATCHMAKING QUEUE ENGINE ---
+# ==============================================================================
+
+# Ensure global queue list trackers exist at the top of your script:
+if 'ACTIVE_QUEUES' not in globals():
+    ACTIVE_QUEUES = {1: [], 2: [], 3: []}
+
+def make_queue_embed(q_type: int) -> discord.Embed:
+    """Helper generator to render the active waiting pool display layout."""
+    player_ids = ACTIVE_QUEUES.get(q_type, [])
+    capacity = q_type * 2
+    
+    # Format mention string blocks for clear scannability
+    if player_ids:
+        player_list_str = "\n".join(f"• <@{p_id}>" for p_id in player_ids)
+    else:
+        player_list_str = "_No players currently waiting in this bracket pool._"
+        
+    embed = discord.Embed(
+        title=f"🏒 {q_type}v{q_type} Competitive Matchmaking Queue",
+        description="Select an action node trigger below to manage your registration slot inside the active waiting roster tree.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name=f"👥 Registered Competitors ({len(player_ids)}/{capacity})", value=player_list_str, inline=False)
+    embed.set_footer(text="Match series initialization automatically triggers once player allocation bounds are full.")
+    return embed
+
+
 class QueueView(discord.ui.View):
-    def __init__(self, q_type):
+    def __init__(self, q_type: int):
         super().__init__(timeout=None)
         self.q_type = q_type
 
-    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.primary, custom_id="join_queue_btn")
+    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.primary, custom_id="join_queue_node_btn")
     async def join_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         u_id = interaction.user.id
         queue = ACTIVE_QUEUES[self.q_type]
+        capacity = self.q_type * 2
         
         if u_id in queue:
-            return await interaction.response.send_message("⚠️ Tracking State: You are already registered inside this specific match waiting pool loop.", ephemeral=True)
+            return await interaction.response.send_message("⚠️ Tracking Error: You are already registered inside this specific match waiting pool loop.", ephemeral=True)
             
         queue.append(u_id)
         
-        # Allocate Queue Roles if config tracks them
-        if DATA["config"]["queue_role_id"]:
-            role = interaction.guild.get_role(int(DATA["config"]["queue_role_id"]))
-            if role:
+        # Allocate server role metrics if configured inside database tracking rules
+        q_role_id = DATA["config"].get("queue_role_id")
+        if q_role_id:
+            role = interaction.guild.get_role(int(q_role_id))
+            if role: 
                 await interaction.user.add_roles(role)
                 
-        await interaction.response.send_message(f"✅ Added to {self.q_type}v{self.q_type} Queue ({len(queue)}/{self.q_type * 2})", ephemeral=False)
+        # Re-render base UI layout and check initialization conditions
+        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
         
-        if len(queue) >= (self.q_type * 2):
+        if len(queue) >= capacity:
             await trigger_match_initialization(interaction.guild, self.q_type)
 
+    @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.danger, custom_id="leave_queue_node_btn")
+    async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        u_id = interaction.user.id
+        queue = ACTIVE_QUEUES[self.q_type]
+        
+        if u_id not in queue:
+            return await interaction.response.send_message("❌ Error: You are not currently registered inside this active queue waiting tree.", ephemeral=True)
+            
+        queue.remove(u_id)
+        
+        # Strip queue roles cleanly if tracked
+        q_role_id = DATA["config"].get("queue_role_id")
+        if q_role_id:
+            role = interaction.guild.get_role(int(q_role_id))
+            if role: 
+                await interaction.user.remove_roles(role)
+                
+        # Update live screen layout changes instantly
+        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
 
-async def trigger_match_initialization(guild, q_type):
+
+async def trigger_match_initialization(guild: discord.Guild, q_type: int):
+    # Snapshot queue values state and clear volatile working arrays
     queue = ACTIVE_QUEUES[q_type].copy()
     ACTIVE_QUEUES[q_type].clear()
+    
+    # Shuffle to guarantee non-biased random team selection processing
     random.shuffle(queue)
     
     team_size = q_type
@@ -753,10 +808,14 @@ async def trigger_match_initialization(guild, q_type):
     m_id = DATA["next_match_id"]
     DATA["next_match_id"] += 1
     
-    # Strip queue roles and add Match Active tracking configurations
-    q_role = guild.get_role(int(DATA["config"]["queue_role_id"])) if DATA["config"]["queue_role_id"] else None
-    m_role = guild.get_role(int(DATA["config"]["match_role_id"])) if DATA["config"]["match_role_id"] else None
+    # Clear tracking role configurations flags
+    q_role_id = DATA["config"].get("queue_role_id")
+    m_role_id = DATA["config"].get("match_role_id")
     
+    q_role = guild.get_role(int(q_role_id)) if q_role_id else None
+    m_role = guild.get_role(int(m_role_id)) if m_role_id else None
+    
+    # Lock channel permissions exclusively to the matched players and staff
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True)
@@ -781,28 +840,37 @@ async def trigger_match_initialization(guild, q_type):
     t2_names = [guild.get_member(p).display_name for p in team2_ids if guild.get_member(p)]
     
     DATA["matches"][str(m_id)] = {
-        "channel_id": channel.id, 
+        "channel_id": channel.id,
         "type": q_type,
-        "team1": team1_ids, 
+        "team1": team1_ids,
         "team2": team2_ids
     }
     save_data()
     
-    embed = discord.Embed(title=f"⚡ Match Series #{m_id} Initialized!", color=discord.Color.red(), description="Format: Best of 3 Matches Series Blueprint Setup")
-    embed.add_field(name="🟢 Team 1 (Home)", value="\n".join(t1_names) or "Empty Thread", inline=True)
-    embed.add_field(name="🔵 Team 2 (Away)", value="\n".join(t2_names) or "Empty Thread", inline=True)
-    embed.set_footer(text="Staff must execute /reportmatch to resolve this match data index tree manually.")
+    embed = discord.Embed(
+        title=f"⚡ Match Series #{m_id} Initialized!", 
+        color=discord.Color.red(), 
+        description="Format Setup Type: **Best of 3 Matches Series Blueprint**"
+    )
+    embed.add_field(name="🟢 Team 1 (Home)", value="\n".join(t1_names) or "Empty Thread Roster", inline=True)
+    embed.add_field(name="🔵 Team 2 (Away)", value="\n".join(t2_names) or "Empty Thread Roster", inline=True)
+    embed.set_footer(text="Staff administrators must execute /reportmatch to finalize these metrics manually.")
     
-    await channel.send(embed=embed)
+    await channel.send(content=" ".join(f"<@{p_id}>" for p_id in queue), embed=embed)
 
 
 @bot.hybrid_command(name="setupqueue", description="Staff Command: Spawn a dynamic interactive match-making interface link widget")
 @is_staff()
 @app_commands.choices(format_size=[
-    app_commands.Choice(name="1v1 Bracket", value=1), 
-    app_commands.Choice(name="2v2 Bracket", value=2), 
-    app_commands.Choice(name="3v3 Bracket", value=3)
+    app_commands.Choice(name="1v1 Bracket Match", value=1), 
+    app_commands.Choice(name="2v2 Bracket Match", value=2), 
+    app_commands.Choice(name="3v3 Bracket Match", value=3)
 ])
+async def setupqueue(ctx, format_size: int):
+    view = QueueView(format_size)
+    embed = make_queue_embed(format_size)
+    await ctx.send(embed=embed, view=view)
+
 async def setupqueue(ctx, format_size: int):
     view = QueueView(format_size)
     embed = discord.Embed(
