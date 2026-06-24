@@ -111,9 +111,35 @@ def save_data():
 
 def load_data():
     global DATA
+    # 1. Attempt to read locally first
     if os.path.exists(DATABASE_FILE):
-        with open(DATABASE_FILE, "r") as f:
-            DATA = json.load(f)
+        try:
+            with open(DATABASE_FILE, "r") as f:
+                DATA = json.load(f)
+                print("💾 Local database loaded successfully.")
+                return
+        except Exception as e:
+            print(f"Local Read Error: {e}")
+
+    # 2. If local file is missing, pull the permanent copy directly from GitHub Cloud!
+    if GH_TOKEN:
+        try:
+            url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+            headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+            res = requests.get(url, headers=headers)
+            
+            if res.status_code == 200:
+                file_data = res.json()
+                content = base64.b64decode(file_data["content"]).decode("utf-8")
+                DATA = json.loads(content)
+                print("☁️ Permanent database successfully pulled and restored from GitHub Cloud!")
+                
+                with open(DATABASE_FILE, "w") as f:
+                    json.dump(DATA, f, indent=4)
+            else:
+                print(f"⚠️ Cloud Pull Failed ({res.status_code}): No remote backup found yet.")
+        except Exception as e:
+            print(f"GitHub Cloud Pull Fault: {e}")
 
 def verify_user(user_id_str, username="Unknown"):
     if user_id_str not in DATA["users"]:
@@ -151,6 +177,17 @@ async def on_ready():
         print("🔄 Slash layout modules linked seamlessly.")
     except Exception as e:
         print(f"Sync Error: {e}")
+
+@bot.command(name="forcesync")
+async def forcesync(ctx):
+    """Bypasses all caches and forces absolute registration of every hybrid command."""
+    await ctx.defer()
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"✅ Master Force Sync Complete! Registered **{len(synced)}** slash layouts to Discord servers.")
+    except Exception as e:
+        await ctx.send(f"❌ Force Sync Crashed: {e}")
+
 
 # ==============================================================================
 # --- SYSTEM MANAGEMENT & HELP MODULES ---
