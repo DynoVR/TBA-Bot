@@ -8,8 +8,10 @@ import random
 import threading
 import requests
 import base64
+import re  
 from datetime import datetime, timedelta
 from flask import Flask
+
 
 # --- Flask Keep-Alive Web Server ---
 app = Flask('')
@@ -835,9 +837,70 @@ async def setupqueue(ctx, format_size: int):
     embed = make_queue_embed(format_size)
     await ctx.send(embed=embed, view=view)
 
+
+# ==============================================================================
+# --- NEATQUE RESULT SCRAPER EVENT LISTENER ---
+# ==============================================================================
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author == bot.user:
+        return
+
+    # Listen directly to NeatQue bot outputs to harvest player match standings
+    if message.author.name == "NeatQue" or message.author.id == 1152011039868612660:
+        text_to_scan = ""
+        
+        if message.content:
+            text_to_scan += message.content + "\n"
+            
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.description:
+                    text_to_scan += embed.description + "\n"
+                for field in embed.fields:
+                    text_to_scan += f"{field.name} {field.value}\n"
+
+        # Regex blueprints scanning mentions mapped to arithmetic + or - symbols
+        winner_pattern = r"<@!?(\d+)>\s*\+"
+        winning_user_ids = re.findall(winner_pattern, text_to_scan)
+
+        loser_pattern = r"<@!?(\d+)>\s*-"
+        losing_user_ids = re.findall(loser_pattern, text_to_scan)
+
+        if winning_user_ids or losing_user_ids:
+            reward = DATA["config"].get("match_reward", 25)
+            awarded_mentions = []
+
+            for p_id in winning_user_ids:
+                p_str = str(p_id)
+                verify_user(p_str, f"User {p_str}")
+                DATA["users"][p_str]["coins"] += reward
+                DATA["users"][p_str]["wins"] += 1
+                awarded_mentions.append(f"<@{p_str}>")
+
+            for p_id in losing_user_ids:
+                p_str = str(p_id)
+                verify_user(p_str, f"User {p_str}")
+                DATA["users"][p_str]["losses"] += 1
+
+            # Push permanent cloud backup saves instantly
+            save_data()
+
+            if awarded_mentions:
+                await message.channel.send(
+                    f"🪙 **NeatQue Leaderboard Sync!** Detected match stats resolution.\n"
+                    f"The following winners have been credited with **{reward} coins**: "
+                    f"{', '.join(awarded_mentions)}"
+                )
+
+    await bot.process_commands(message)
+
+
 # --- Start Services ---
 keep_alive()
 bot.run(TOKEN)
+
 
 
 
