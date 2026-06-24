@@ -202,7 +202,7 @@ if "processed_neatque_matches" not in DATA:
 
 @tasks.loop(seconds=30)
 async def automatic_neatque_scanner():
-    """Background Task: Actively polls server channels to auto-reward match winners."""
+    """Background Task: Actively processes text and columns inside match rooms only when matches conclude."""
     await bot.wait_until_ready()
     
     for guild in bot.guilds:
@@ -228,39 +228,69 @@ async def automatic_neatque_scanner():
                         
                         if is_neat or is_webhook or is_bot:
                             text_to_scan = ""
+                            
                             if message.content:
                                 text_to_scan += message.content + "\n"
+                                
                             if message.embeds:
                                 for embed in message.embeds:
                                     if embed.title: text_to_scan += embed.title + "\n"
                                     if embed.description: text_to_scan += embed.description + "\n"
                                     for field in embed.fields: text_to_scan += f" {field.name} {field.value} \n"
-                                    
-                            if "winner" not in text_to_scan.lower():
+
+                            clean_text_payload = text_to_scan.lower()
+
+                            # 🚨 FIX: SKIP PRE-MATCH TRAFFIC AND TIMEOUT MESSAGES
+                            # If NeatQueue is just showing potential gains or active players, skip it.
+                            # We ONLY want the final message that announces the absolute winner.
+                            if "winner" not in clean_text_payload or "potential" in clean_text_payload:
                                 continue
-                                
+
                             winning_user_ids = []
                             losing_user_ids = []
                             
+                            # 🎯 STEREOSCOPIC ID EXTRACTOR
                             winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
                             losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
                             
+                            # 🎯 REINFORCED LINE-BY-LINE NICKNAME FALLBACK
                             if not winners_found and not losers_found:
                                 for line in text_to_scan.split("\n"):
-                                    if "+" in line:
-                                        plain_win = re.findall(r"@([^+\-\n\s\(]+)", line)
-                                        for name in plain_win:
-                                            m = discord.utils.get(guild.members, display_name=name) or discord.utils.get(guild.members, name=name)
-                                            if m: winning_user_ids.append(str(m.id))
-                                    elif "-" in line:
-                                        plain_loss = re.findall(r"@([^+\-\n\s\(]+)", line)
-                                        for name in plain_loss:
-                                            m = discord.utils.get(guild.members, display_name=name) or discord.utils.get(guild.members, name=name)
-                                            if m: losing_user_ids.append(str(m.id))
+                                    line = line.strip()
+                                    if not line or ("+" not in line and "-" not in line):
+                                        continue
+                                        
+                                    has_plus = "+" in line
+                                    has_minus = "-" in line
+                                    
+                                    clean_line = re.sub(r"\([^\)]+\)", "", line)  
+                                    clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  
+                                    clean_line = clean_line.replace("@", "").strip()  
+                                    
+                                    if not clean_line or len(clean_line) < 2:
+                                        continue
+                                        
+                                    member = discord.utils.get(guild.members, display_name=clean_line) or \
+                                             discord.utils.get(guild.members, name=clean_line)
+                                             
+                                    if not member:
+                                        search_text = clean_line.lower()
+                                        for m in guild.members:
+                                            if search_text in m.display_name.lower() or search_text in m.name.lower():
+                                                member = m
+                                                break
+                                                
+                                    if member:
+                                        p_id_str = str(member.id)
+                                        if has_plus and p_id_str not in winning_user_ids:
+                                            winning_user_ids.append(p_id_str)
+                                        elif has_minus and p_id_str not in losing_user_ids:
+                                            losing_user_ids.append(p_id_str)
                             else:
                                 winning_user_ids = winners_found
                                 losing_user_ids = losers_found
                                 
+                            # 3. Apply database ledger rewards deposits
                             if winning_user_ids or losing_user_ids:
                                 reward = DATA["config"].get("match_reward", 25)
                                 awarded_mentions = []
@@ -282,13 +312,12 @@ async def automatic_neatque_scanner():
                                 
                                 if awarded_mentions:
                                     await channel.send(
-                                        f"🪙 **NeatQueue Auto-Automation Active!** Scanned match scorecard.\n"
-                                        f"The following winners have been automatically credited with **{reward} coins**: "
+                                        f"🪙 **NeatQueue Automated Link Synced!** Final match result parsed successfully.\n"
+                                        f"The following winners have been credited with **{reward} coins**: "
                                         f"{', '.join(awarded_mentions)}"
                                     )
                 except Exception as e:
                     pass
-
 
 # ==============================================================================
 # --- BOT INITIALIZER AND EVENT HOOKS ---
@@ -310,12 +339,6 @@ async def on_ready():
     except Exception as e:
         print(f"Sync Error: {e}")
 
-            
-    try:
-        await bot.tree.sync()
-        print("🔄 Slash layout modules linked seamlessly.")
-    except Exception as e:
-        print(f"Sync Error: {e}")
 
 @bot.command(name="forcesync")
 async def forcesync(ctx):
