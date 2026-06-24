@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 from flask import Flask
 
 # --- Flask Keep-Alive Web Server ---
-# Optimized to send a tiny 2-character payload so cron-job.org never errors out
 app = Flask('')
 
 @app.route('/')
@@ -30,7 +29,6 @@ def keep_alive():
 
 # --- Configuration & Security ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
-STAFF_ROLE_NAME = "Staff"
 DATABASE_FILE = "card_league_database.json"
 
 # --- GitHub Auto-Sync Save System Configurations ---
@@ -44,7 +42,6 @@ RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epi
 
 # --- Complete Consolidated Database System ---
 DATA = {
-    # Existing Season Setup Layout Tracks
     "season_title": "TBA League",
     "games_count": 0,
     "preseason": False,
@@ -52,38 +49,24 @@ DATA = {
     "players": {},
     "schedule": [],
     "playoffs": { "active": False, "best_of": 3, "rounds": {} },
-    
-    # Card Collector Engine Tracks
-    "global_cards": {},  # card_id -> { name, rarity, overall, image_url }
-    "users": {},         # user_id -> { coins, inventory: {card_id: count}, last_weekly, wins, losses }
-    "matches": {},       # match_id -> { channel_id, type, team1: [], team2: [] }
+    "global_cards": {},  # unique_card_id -> { name, player_id, rarity, overall, image_url }
+    "users": {},         # user_id -> { coins, inventory: {unique_card_id: count}, last_weekly, wins, losses }
+    "matches": {},       # match_id -> { channel_id, type, team1: [], team2: [], votes: {player_id: vote_int} }
     "next_match_id": 1,
-    
-    # Global Config Properties
     "config": {
         "pack_3_price": 50,
         "pack_5_price": 80,
         "pack_10_price": 150,
         "match_reward": 25,
         "queue_role_id": None,
-        "match_role_id": None
+        "match_role_id": None,
+        "staff_role_id": None  # Dynamic staff configuration storage
     }
 }
 
-import requests
-import base64
-
-# --- GitHub Auto-Sync Save System Configurations ---
-# Replace these strings with your exact GitHub repository details
-GITHUB_USERNAME = "DynoVR"
-GITHUB_REPO = "hockey-bot"
-GITHUB_FILE_PATH = "card_league_database.json"
-
-# IMPORTANT: You must add a 'GH_TOKEN' variable to your Render Environment tab!
-GH_TOKEN = os.environ.get("GH_TOKEN")
+ACTIVE_QUEUES = {1: [], 2: [], 3: []}
 
 def save_data():
-    """Saves data locally and automatically syncs it back to your GitHub Repo permanently."""
     try:
         with open(DATABASE_FILE, "w") as f:
             json.dump(DATA, f, indent=4)
@@ -91,384 +74,20 @@ def save_data():
         print(f"Local Save Error: {e}")
 
     if not GH_TOKEN:
-        print("⚠️ Warning: GH_TOKEN missing in Render Environment. Data saved ONLY locally (Volatile).")
         return
 
     try:
         url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
-        headers = {
-            "Authorization": f"token {GH_TOKEN}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
+        headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
         get_req = requests.get(url, headers=headers)
         sha = get_req.json().get("sha") if get_req.status_code == 200 else None
-        
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
-        
-        payload = {
-            "message": "🔄 Automated Live Database State Backup Sync",
-            "content": encoded_content
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        put_req = requests.put(url, headers=headers, json=payload)
-        if put_req.status_code in (200, 201):
-            print("💾 Database securely backed up to GitHub Repository successfully!")
-        else:
-            print(f"GitHub Sync Failed: {put_req.text}")
-            
+        payload = {"message": "🔄 Automated Live Database State Backup Sync", "content": encoded_content}
+        if sha: payload["sha"] = sha
+        requests.put(url, headers=headers, json=payload)
     except Exception as e:
-        print(f"GitHub Remote Cloud Sync Fault: {e}")
-
-# --- ADD THESE CRITICAL MISSING DATA BLOCK MANAGERS BACK IN ---
-def load_data():
-    global DATA
-    if os.path.exists(DATABASE_FILE):
-        with open(DATABASE_FILE, "r") as f:
-            DATA = json.load(f)
-
-def verify_user(user_id_str, username="Unknown"):
-    if user_id_str not in DATA["users"]:
-        DATA["users"][user_id_str] = {
-            "name": username, 
-            "coins": 100, 
-            "inventory": {},
-            "last_weekly": None, 
-            "wins": 0, 
-            "losses": 0
-        }
-
-def is_staff():
-    async def predicate(ctx):
-        return any(role.name == STAFF_ROLE_NAME for role in ctx.author.roles)
-    return commands.check(predicate)
-
-# --- Bot Setup Initializer ---
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# ==============================================================================
-# --- CARD CREATION AND MANAGEMENT MODULES ---
-# ==============================================================================
-
-@bot.hybrid_command(name="addcard", description="Staff Command: Initialize a new player card profile into the master catalog")
-@is_staff()
-@app_commands.choices(rarity=[
-    app_commands.Choice(name="Average (White)", value="Average"),
-    app_commands.Choice(name="Great (Dark Purple)", value="Great"),
-    app_commands.Choice(name="Epic (Emerald Green)", value="Epic"),
-    app_commands.Choice(name="Insane (Royal Purple)", value="Insane"),
-    app_commands.Choice(name="Pro (Gold)", value="Pro"),
-    app_commands.Choice(name="Juggernaut (Bronze Orange)", value="Juggernaut"),
-    app_commands.Choice(name="Otherworldly (Dark Red)", value="Otherworldly"),
-    app_commands.Choice(name="Specialty (Silver)", value="Specialty")
-])
-async def addcard(ctx, player: discord.Member, rarity: str, overall: int, image_url: str = None):
-    card_id = str(player.id)
-    
-    # Store card data profile
-    DATA["global_cards"][card_id] = {
-        "name": player.display_name,
-        "rarity": rarity,
-        "overall": max(1, min(overall, 99)),  # Lock range between 1-99
-        "image_url": image_url or ""
-    }
-
-    
-    save_data()
-    await ctx.send(f"✅ Successfully created card profile for **{player.display_name}**! [{rarity} | {overall} OVR]")
-
-# ==============================================================================
-# --- CARD PACK ECONOMY & WEEKLY REWARDS MODULES ---
-# ==============================================================================
-
-def draw_random_cards(count: int) -> list:
-    """Helper algorithm to select cards based on realistic tier drop probabilities."""
-    if not DATA["global_cards"]:
-        return []
-        
-    # Group every card in your database by its rarity string
-    grouped_cards = {rarity: [] for rarity in RARITY_ORDER}
-    for card_id, card_data in DATA["global_cards"].items():
-        grouped_cards[card_data["rarity"]].append(card_id)
-        
-    # Define weight percentages (Average is easiest, Specialty/Otherworldly are rarest)
-    rarity_weights = {
-        "Average": 45.0,
-        "Great": 25.0,
-        "Epic": 15.0,
-        "Insane": 8.0,
-        "Pro": 4.0,
-        "Juggernaut": 2.0,
-        "Otherworldly": 0.8,
-        "Specialty": 0.2
-    }
-    
-    drawn_list = []
-    # Loop for how many cards are inside the purchased pack container
-    for _ in range(count):
-        # Fallback list to make sure we don't pick from empty tiers
-        available_rarities = [r for r in RARITY_ORDER if grouped_cards[r]]
-        if not available_rarities:
-            # If all categorized arrays are empty, just pull any card blindly
-            drawn_list.append(random.choice(list(DATA["global_cards"].keys())))
-            continue
-            
-        weights = [rarity_weights[r] for r in available_rarities]
-        selected_rarity = random.choices(available_rarities, weights=weights, k=1)[0]
-        
-        # Pick a random player card from inside that chosen tier bracket
-        random_card_id = random.choice(grouped_cards[selected_rarity])
-        drawn_list.append(random_card_id)
-        
-    return drawn_list
-
-
-@bot.hybrid_command(name="buypack", description="Public Command: Spend league coins to open card packs of varying sizes")
-@app_commands.choices(pack_size=[
-    app_commands.Choice(name="3 Player Pack", value=3),
-    app_commands.Choice(name="5 Player Pack", value=5),
-    app_commands.Choice(name="10 Player Pack", value=10)
-])
-async def buypack(ctx, pack_size: int):
-    if not DATA["global_cards"]:
-        return await ctx.send("❌ Store Unavailable: There are no player cards created in the system database yet.")
-        
-    u_id = str(ctx.author.id)
-    verify_user(u_id, ctx.author.display_name)
-    
-    # Check price key mapping
-    price_key = f"pack_{pack_size}_price"
-    pack_cost = DATA["config"].get(price_key, 100)
-    
-    if DATA["users"][u_id]["coins"] < pack_cost:
-        return await ctx.send(f"❌ Transaction Denied: You need **{pack_cost}** coins to buy this pack. Your Balance: **{DATA['users'][u_id]['coins']}** coins.")
-        
-    # Execute transaction deduction
-    DATA["users"][u_id]["coins"] -= pack_cost
-    
-    # Process drawing engine math
-    pulled_card_ids = draw_random_cards(pack_size)
-    
-    # Deposit items into user roster inventory dictionary
-    results_display = []
-    for c_id in pulled_card_ids:
-        card = DATA["global_cards"][c_id]
-        DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
-        results_display.append(f"📦 **[{card['rarity']}]** {card['name']} ({card['overall']} OVR)")
-        
-    save_data()
-    
-    embed = discord.Embed(
-        title="🎉 Pack Opened Successfully!", 
-        description=f"You opened a **{pack_size} Card Pack** for **{pack_cost} coins**.\n\n" + "\n".join(results_display),
-        color=discord.Color.gold()
-    )
-    embed.set_footer(text=f"New Wallet Balance: {DATA['users'][u_id]['coins']} coins")
-    await ctx.send(embed=embed)
-
-
-@bot.hybrid_command(name="claimweekly", description="Public Command: Claim your free weekly 3-player starter pack")
-async def claimweekly(ctx):
-    if not DATA["global_cards"]:
-        return await ctx.send("❌ Store Unavailable: No card baseline entries exist to drop items from.")
-        
-    u_id = str(ctx.author.id)
-    verify_user(u_id, ctx.author.display_name)
-    
-    current_time = datetime.now()
-    last_claim_str = DATA["users"][u_id].get("last_weekly")
-    
-    # Validate cooldown safety windows
-    if last_claim_str:
-        last_claim_dt = datetime.fromisoformat(last_claim_str)
-        cooldown_end = last_claim_dt + timedelta(days=7)
-        if current_time < cooldown_end:
-            time_remaining = cooldown_end - current_time
-            days = time_remaining.days
-            hours = time_remaining.seconds // 3600
-            return await ctx.send(f"⏳ Cooldown Active: You already claimed your free drop. Try again in **{days} days and {hours} hours**.")
-            
-    # Draw rewards and update date strings
-    pulled_card_ids = draw_random_cards(3)
-    results_display = []
-    for c_id in pulled_card_ids:
-        card = DATA["global_cards"][c_id]
-        DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
-        results_display.append(f"🎁 **[{card['rarity']}]** {card['name']} ({card['overall']} OVR)")
-        
-    DATA["users"][u_id]["last_weekly"] = current_time.isoformat()
-    save_data()
-    
-    embed = discord.Embed(
-        title="📅 Weekly Card Reward Claimed!", 
-        description="Your free structural **3-Player Pack** has been deposited:\n\n" + "\n".join(results_display),
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
-
-
-@bot.hybrid_command(name="setpackprices", description="Staff Command: Adjust purchase cost variables for league pack tiers")
-@is_staff()
-async def setpackprices(ctx, pack_3_cost: int, pack_5_cost: int, pack_10_cost: int):
-    DATA["config"]["pack_3_price"] = max(1, pack_3_cost)
-    DATA["config"]["pack_5_price"] = max(1, pack_5_cost)
-    DATA["config"]["pack_10_price"] = max(1, pack_10_cost)
-    
-    save_data()
-    await ctx.send(f"⚙️ **Pack Prices Configured!**\n• 3 Pack: `{pack_3_cost}` coins\n• 5 Pack: `{pack_5_cost}` coins\n• 10 Pack: `{pack_10_cost}` coins")
-# ==============================================================================
-# --- LEADERBOARD & METRIC TRACKING CONTROL MODULES ---
-# ==============================================================================
-
-@bot.hybrid_command(name="leaderboard", description="Public Command: Display top players sorted by competitive match victories")
-async def leaderboard(ctx):
-    if not DATA["users"]:
-        return await ctx.send("📂 Database Empty: No active user profile data logs registered yet.")
-        
-    # Sort accounts by total wins descending, then lower losses as a tiebreaker
-    sorted_users = sorted(
-        DATA["users"].items(), 
-        key=lambda x: (x[1].get("wins", 0), -x[1].get("losses", 0)), 
-        reverse=True
-    )
-    
-    # Filter out empty profiles to keep data clean
-    active_board = [u for u in sorted_users if u[1].get("wins", 0) > 0 or u[1].get("losses", 0) > 0]
-    
-    if not active_board:
-        return await ctx.send("📊 Leaderboard Empty: No matches have been recorded inside the ledger history files yet.")
-        
-    desc_lines = []
-    # Build list display limit capped to top 10 profiles
-    for idx, (u_id, u_data) in enumerate(active_board[:10], start=1):
-        win_count = u_data.get("wins", 0)
-        loss_count = u_data.get("losses", 0)
-        
-        # Calculate win ratio mathematics
-        total_games = win_count + loss_count
-        ratio = (win_count / total_games * 100) if total_games > 0 else 0.0
-        
-        desc_lines.append(
-            f"**#{idx}** <@{u_id}> — **{win_count}** W | **{loss_count}** L _({ratio:.1f}% WR)_"
-        )
-        
-    embed = discord.Embed(
-        title="🏆 Matchmaking Queue Master Leaderboard", 
-        description="\n".join(desc_lines), 
-        color=discord.Color.blue()
-    )
-    await ctx.send(embed=embed)
-
-
-@bot.hybrid_command(name="resetleaderboard", description="Staff Command: Wipe out all player win/loss statistics across the server ledger")
-@is_staff()
-async def resetleaderboard(ctx):
-    if not DATA["users"]:
-        return await ctx.send("❌ Error: User registry database folder is currently uninitialized.")
-        
-    # Clear variables while keeping their collection inventories intact
-    for u_id in DATA["users"]:
-        DATA["users"][u_id]["wins"] = 0
-        DATA["users"][u_id]["losses"] = 0
-        
-    save_data()
-    await ctx.send("🧹 **Leaderboard Cleared!** All player competitive matchmaking win and loss metrics have been reset to 0.")
-
-
-@bot.hybrid_command(name="editmatchreward", description="Staff Command: Set the coin reward value handed out to winning teams")
-@is_staff()
-async def editmatchreward(ctx, new_reward: int):
-    # Lock lower bounds threshold to 0 coins
-    DATA["config"]["match_reward"] = max(0, new_reward)
-    save_data()
-    await ctx.send(f"🪙 **Match Reward Adjusted!** Winning teams will now receive `{new_reward}` coins per series.")
-
-
-
-@bot.hybrid_command(name="removecard", description="Staff Command: Completely erase a card profile from the global master list")
-@is_staff()
-async def removecard(ctx, player: discord.Member):
-    card_id = str(player.id)
-    if card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: That player does not have an active card profile in the catalog.")
-        
-    card_name = DATA["global_cards"][card_id]["name"]
-    del DATA["global_cards"][card_id]
-    
-    # Clean up inventories so players don't hold corrupted data links
-    for u_id in DATA["users"]:
-        if card_id in DATA["users"][u_id]["inventory"]:
-            del DATA["users"][u_id]["inventory"][card_id]
-            
-    save_data()
-    await ctx.send(f"🗑️ Successfully purged **{card_name}**'s card profile from all databases completely.")
-
-
-@bot.hybrid_command(name="changerarity", description="Staff Command: Update a player card's rarity tier and statistical overall value")
-@is_staff()
-@app_commands.choices(new_rarity=[
-    app_commands.Choice(name="Average (White)", value="Average"),
-    app_commands.Choice(name="Great (Dark Purple)", value="Great"),
-    app_commands.Choice(name="Epic (Emerald Green)", value="Epic"),
-    app_commands.Choice(name="Insane (Royal Purple)", value="Insane"),
-    app_commands.Choice(name="Pro (Gold)", value="Pro"),
-    app_commands.Choice(name="Juggernaut (Bronze Orange)", value="Juggernaut"),
-    app_commands.Choice(name="Otherworldly (Dark Red)", value="Otherworldly"),
-    app_commands.Choice(name="Specialty (Silver)", value="Specialty")
-])
-async def changerarity(ctx, player: discord.Member, new_rarity: str, new_overall: int):
-    card_id = str(player.id)
-    if card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: No card profile found for this user. Create it first using `/addcard`.")
-        
-    DATA["global_cards"][card_id]["rarity"] = new_rarity
-    DATA["global_cards"][card_id]["overall"] = max(1, min(new_overall, 99))
-    
-    save_data()
-    await ctx.send(f"🔧 Updated **{player.display_name}**'s card baseline! New values: [{new_rarity} | {new_overall} OVR]")
-
-
-
-# --- Rarity Metrics Configuration ---
-RARITY_CONFIG = {
-    "Average": {"color": discord.Color.from_rgb(255, 255, 255), "weight": 55, "label": "Average (White)"},
-    "Great": {"color": discord.Color.from_rgb(128, 0, 128), "weight": 20, "label": "Great (Dark Purple)"},
-    "Epic": {"color": discord.Color.from_rgb(80, 200, 120), "weight": 12, "label": "Epic (Emerald Green)"},
-    "Insane": {"color": discord.Color.from_rgb(147, 112, 219), "weight": 6, "label": "Insane (Royal Purple)"},
-    "Pro": {"color": discord.Color.from_rgb(255, 215, 0), "weight": 4, "label": "Pro (Gold)"},
-    "Juggernaut": {"color": discord.Color.from_rgb(205, 127, 50), "weight": 2, "label": "Juggernaut (Bronze Orange)"},
-    "Otherworldly": {"color": discord.Color.from_rgb(139, 0, 0), "weight": 0.8, "label": "Otherworldly (Dark Red)"},
-    "Specialty": {"color": discord.Color.from_rgb(192, 192, 192), "weight": 0.2, "label": "Specialty (Silver)"}
-}
-
-# Ordered priority mapping for sorted ledger trees
-RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
-
-# --- Database Core System ---
-DATA = {
-    "config": {
-        "pack_3_price": 50,
-        "pack_5_price": 80,
-        "pack_10_price": 150,
-        "match_reward": 25,
-        "queue_role_id": None,
-        "match_role_id": None
-    },
-    "global_cards": {},  # card_id -> { name, rarity, overall, image_url }
-    "users": {},         # user_id -> { coins, inventory: {card_id: count}, last_weekly, wins, losses }
-    "matches": {},       # match_id -> { channel_id, type, team1: [], team2: [] }
-    "next_match_id": 1
-}
-
-def save_data():
-    with open(DATABASE_FILE, "w") as f:
-        json.dump(DATA, f, indent=4)
+        print(f"GitHub Cloud Sync Fault: {e}")
 
 def load_data():
     global DATA
@@ -483,602 +102,549 @@ def verify_user(user_id_str, username="Unknown"):
             "last_weekly": None, "wins": 0, "losses": 0
         }
 
-# --- Bot Context Initialization ---
+# --- Permission Check Decorators ---
+def is_staff():
+    async def predicate(ctx):
+        if ctx.author.id == ctx.guild.owner_id:
+            return True
+        staff_role_id = DATA["config"].get("staff_role_id")
+        if staff_role_id:
+            return any(str(role.id) == str(staff_role_id) for role in ctx.author.roles)
+        return any(role.name.lower() == "staff" for role in ctx.author.roles)
+    return commands.check(predicate)
+
+# --- Bot Initialization ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-bot = commands.Bot(command_prefix="?", intents=intents)
-
-def is_staff():
-    async def predicate(ctx):
-        return any(role.name == STAFF_ROLE_NAME for role in ctx.author.roles)
-    return commands.check(predicate)
-
-# --- Active Volatile Queue Containers ---
-ACTIVE_QUEUES = {1: [], 2: [], 3: []}  # 1v1, 2v2, 3v3
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
     load_data()
-    print(f"🏒 Card Collector Engine Running: Signed in as {bot.user}")
+    keep_alive()
+    print(f"🏒 Bot Online: Connected as {bot.user}")
     try:
         await bot.tree.sync()
     except Exception as e:
-        print(f"Sync error: {e}")
+        print(f"Sync Error: {e}")
 
 # ==============================================================================
-# --- CARD SYSTEM COMMANDS ---
+# --- SYSTEM MANAGEMENT & HELP MODULES ---
 # ==============================================================================
 
-@bot.hybrid_command(name="addcard", description="Staff Command: Register a new player framework card item blueprint")
-@is_staff()
-@app_commands.choices(rarity=[app_commands.Choice(name=v["label"], value=k) for k, v in RARITY_CONFIG.items()])
-async def addcard(ctx, player: discord.Member, rarity: str, overall: int, image_attachment: discord.Attachment = None):
-    card_id = str(player.id)
-    img_url = image_attachment.url if image_attachment else None
-    
-    DATA["global_cards"][card_id] = {
-        "name": player.display_name,
-        "rarity": rarity,
-        "overall": overall,
-        "image_url": img_url
-    }
+@bot.hybrid_command(name="setstaffrole", description="Owner Command: Configure which server role acts as bot staff admin")
+@commands.has_permissions(administrator=True)
+async def setstaffrole(ctx, role: discord.Role):
+    DATA["config"]["staff_role_id"] = str(role.id)
     save_data()
-    
-    embed = discord.Embed(title="🎴 Card Blueprint Registered", color=RARITY_CONFIG[rarity]["color"])
-    embed.add_field(name="Player Profile", value=player.mention)
-    embed.add_field(name="Rarity Class", value=rarity)
-    embed.add_field(name="Overall Score", value=str(overall))
-    if img_url:
-        embed.set_image(url=img_url)
+    await ctx.send(f"🛡️ **Staff Role Configured!** Users with the role {role.mention} can now execute administration nodes.")
+
+@bot.hybrid_command(name="setmatchreward", description="Staff Command: Configure coin prize value awarded to winning match pools")
+@is_staff()
+async def setmatchreward(ctx, amount: int):
+    DATA["config"]["match_reward"] = max(0, amount)
+    save_data()
+    await ctx.send(f"🪙 **Match Reward Updated!** Winning players will now receive `{amount}` coins per victory.")
+
+@bot.hybrid_command(name="help", description="Public Command: Display full blueprint command reference deck index manual")
+async def help_command(ctx):
+    embed = discord.Embed(title="🏒 League System Command Directory", color=discord.Color.blue())
+    embed.add_field(name="🌐 Public Card Commands", value="`/catalog [page]` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_id> <their_card_id>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
+    embed.add_field(name="⚔️ Matchmaking Commands", value="`/setupqueue <size>` - Deploy interactive match waiting panel\n`Buttons` - Join/Leave queue pool interface nodes", inline=False)
+    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <player> <rarity> <overall> [image_url]` - Initialize new custom card ID profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <give/take> <player> <amount>` - Change balance values safely\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
     await ctx.send(embed=embed)
 
-@bot.hybrid_command(name="removecard", description="Staff Command: Delete a target player card blueprint from data maps completely")
+# ==============================================================================
+# --- CARD SYSTEM ENGINE ---
+# ==============================================================================
+
+@bot.hybrid_command(name="addcard", description="Staff Command: Initialize a new player card instance profile into catalog records")
 @is_staff()
-async def removecard(ctx, player: discord.Member):
-    card_id = str(player.id)
+@app_commands.choices(rarity=[app_commands.Choice(name=r, value=r) for r in RARITY_ORDER])
+async def addcard(ctx, player: discord.Member, rarity: str, overall: int, image_url: str = None):
+    # Generates a clean random string identifier tag for that explicit card instance version
+    card_id = f"{player.name.lower()}_{rarity.lower()}_{random.randint(100, 999)}"
+    DATA["global_cards"][card_id] = {
+        "id": card_id, "name": player.display_name, "player_id": str(player.id),
+        "rarity": rarity, "overall": max(1, min(overall, 99)), "image_url": image_url or ""
+    }
+    save_data()
+    await ctx.send(f"✅ Created Card Profile ID: `{card_id}` for **{player.display_name}**! [{rarity} | {overall} OVR]")
+
+@bot.hybrid_command(name="editcard", description="Staff Command: Modify the rarity, overall, or picture assets of a precise unique card identity code")
+@is_staff()
+@app_commands.choices(rarity=[app_commands.Choice(name=r, value=r) for r in RARITY_ORDER])
+async def editcard(ctx, card_id: str, rarity: str, overall: int, image_url: str = None):
     if card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: That player does not have a card blueprint registered inside the catalog.")
+        return await ctx.send(f"❌ Error: Card reference identifier code `{card_id}` does not exist in master catalog paths.")
+    
+    card = DATA["global_cards"][card_id]
+    card["rarity"] = rarity
+    card["overall"] = max(1, min(overall, 99))
+    if image_url: 
+        card["image_url"] = image_url
         
+    save_data()
+    await ctx.send(f"🔧 Successfully configured precise updates onto Card `{card_id}`! New properties: [{rarity} | {overall} OVR]")
+
+
+@bot.hybrid_command(name="removecard", description="Staff Command: Erase a precise card target ID permanently out of the league data trees")
+@is_staff()
+async def removecard(ctx, card_id: str):
+    if card_id not in DATA["global_cards"]:
+        return await ctx.send("❌ Error: Target card identity target index missing.")
+        
+    card_name = DATA["global_cards"][card_id]["name"]
+    rarity = DATA["global_cards"][card_id]["rarity"]
     del DATA["global_cards"][card_id]
+    
     for u_id in DATA["users"]:
         if card_id in DATA["users"][u_id]["inventory"]:
             del DATA["users"][u_id]["inventory"][card_id]
             
     save_data()
-    await ctx.send(f"🗑️ Card Blueprint and user allocations completely removed for **{player.display_name}**.")
+    await ctx.send(f"🗑️ Successfully deleted version **[{rarity}] {card_name}** (`{card_id}`) from all active server inventory registries.")
 
-@bot.hybrid_command(name="editcardrarity", description="Staff Command: Adjust an active card blueprint's tier settings")
-@is_staff()
-@app_commands.choices(rarity=[app_commands.Choice(name=v["label"], value=k) for k, v in RARITY_CONFIG.items()])
-async def editcardrarity(ctx, player: discord.Member, rarity: str):
-    card_id = str(player.id)
-    if card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: Card blueprint not tracked inside system records.")
-        
-    DATA["global_cards"][card_id]["rarity"] = rarity
-    save_data()
-    await ctx.send(f"🔧 **Rarity Calibration Updated!** **{DATA['global_cards'][card_id]['name']}** moved to tier: `{rarity}`.")
 
 # ==============================================================================
-# --- ECONOMY & SHOP ECO-SYSTEM ---
+# --- CARD PACK DRAW ENGINE & STORE SYSTEMS ---
 # ==============================================================================
 
-@bot.hybrid_command(name="claimweekly", description="Public Command: Request your complimentary free weekly 3-card pack allocation")
-async def claimweekly(ctx):
-    u_id = str(ctx.author.id)
-    verify_user(u_id, ctx.author.display_name)
-    user = DATA["users"][u_id]
+def draw_random_cards(count: int) -> list:
+    """Helper algorithm to select card IDs based on probability distributions."""
+    if not DATA["global_cards"]:
+        return []
+
+    # Group baseline catalog cards by their active rarity tier
+    grouped = {rarity: [] for rarity in RARITY_ORDER}
+    for card_id, card_data in DATA["global_cards"].items():
+        if card_data["rarity"] in grouped:
+            grouped[card_data["rarity"]].append(card_id)
+
+    weights_map = {
+        "Average": 45.0, 
+        "Great": 25.0, 
+        "Epic": 15.0, 
+        "Insane": 8.0, 
+        "Pro": 4.0, 
+        "Juggernaut": 2.0, 
+        "Otherworldly": 0.8, 
+        "Specialty": 0.2
+    }
     
-    now = datetime.utcnow()
-    if user["last_weekly"]:
-        last_claimed = datetime.fromisoformat(user["last_weekly"])
-        if now < last_claimed + timedelta(days=7):
-            delta = (last_claimed + timedelta(days=7)) - now
-            days, hours = delta.days, delta.seconds // 3600
-            return await ctx.send(f"⏳ Cooldown lock active! You can claim again in **{days}d {hours}h**.")
+    drawn = []
+    for _ in range(count):
+        valid_r = [r for r in RARITY_ORDER if grouped[r]]
+        
+        if not valid_r:
+            drawn.append(random.choice(list(DATA["global_cards"].keys())))
+            continue
             
-    if not DATA["global_cards"]:
-        return await ctx.send("❌ Inventory System Fault: No card blueprints have been registered to draw from yet.")
+        weights = [weights_map[r] for r in valid_r]
+        sel_r = random.choices(valid_r, weights=weights, k=1)[0]
+        drawn.append(random.choice(grouped[sel_r]))
         
-    drawn = []
-    cards_pool = list(DATA["global_cards"].items())
-    weights = [RARITY_CONFIG[c[1]["rarity"]]["weight"] for c in cards_pool]
-    
-    for _ in range(3):
-        card = random.choices(cards_pool, weights=weights, k=1)[0]
-        c_id, c_info = card[0], card[1]
-        user["inventory"][c_id] = user["inventory"].get(c_id, 0) + 1
-        drawn.append(f"• **[{c_info['rarity']}]** {c_info['name']} ({c_info['overall']} OVR)")
-        
-    user["last_weekly"] = now.isoformat()
-    save_data()
-    
-    embed = discord.Embed(title="🎁 Weekly Free 3-Pack Opened!", description="\n".join(drawn), color=discord.Color.green())
-    await ctx.send(embed=embed)
+    return drawn
 
-@bot.hybrid_command(name="buypack", description="Public Command: Exchange currency coins to parse randomized card items")
-@app_commands.choices(size=[app_commands.Choice(name="3 Cards", value=3), app_commands.Choice(name="5 Cards", value=5), app_commands.Choice(name="10 Cards", value=10)])
-async def buypack(ctx, size: int):
+
+
+@bot.hybrid_command(name="buypack", description="Public Command: Spend coins to draw player items packs")
+@app_commands.choices(pack_size=[
+    app_commands.Choice(name="3 Players", value=3), 
+    app_commands.Choice(name="5 Players", value=5), 
+    app_commands.Choice(name="10 Players", value=10)
+])
+async def buypack(ctx, pack_size: int):
+    if not DATA["global_cards"]: 
+        return await ctx.send("❌ Store Closed: Card profiles directories uninitialized.")
+        
     u_id = str(ctx.author.id)
     verify_user(u_id, ctx.author.display_name)
-    user = DATA["users"][u_id]
     
-    price_key = f"pack_{size}_price"
-    cost = DATA["config"][price_key]
-    
-    if user["coins"] < cost:
-        return await ctx.send(f"❌ Transaction Fault: Insufficient balance. Pack costs **{cost} coins**. Balance: `{user['coins']}`.")
+    cost = DATA["config"].get(f"pack_{pack_size}_price", 100)
+    if DATA["users"][u_id]["coins"] < cost:
+        return await ctx.send(f"❌ Low Balance: Pack requires {cost} coins. Balance: {DATA['users'][u_id]['coins']}")
         
-    if not DATA["global_cards"]:
-        return await ctx.send("❌ System Registry State Empty: No card targets created to spawn yet.")
-        
-    user["coins"] -= cost
-    drawn = []
-    cards_pool = list(DATA["global_cards"].items())
-    weights = [RARITY_CONFIG[c[1]["rarity"]]["weight"] for c in cards_pool]
+    DATA["users"][u_id]["coins"] -= cost
+    pulled = draw_random_cards(pack_size)
     
-    for _ in range(size):
-        card = random.choices(cards_pool, weights=weights, k=1)[0]
-        c_id, c_info = card[0], card[1]
-        user["inventory"][c_id] = user["inventory"].get(c_id, 0) + 1
-        drawn.append(f"• **[{c_info['rarity']}]** {c_info['name']} ({c_info['overall']} OVR)")
+    lines = []
+    for c_id in pulled:
+        card = DATA["global_cards"][c_id]
+        DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
+        lines.append(f"• [{card['rarity']}] {card['name']} ({card['overall']} OVR) - ID: {c_id}")
         
     save_data()
-    embed = discord.Embed(title=f"🛍️ {size}-Pack Card Draw Complete", description="\n".join(drawn), color=discord.Color.gold())
-    embed.set_footer(text=f"Spent: {cost} coins | Remaining Balance: {user['coins']}")
+    embed = discord.Embed(title="🎉 Box Opening Sequence Complete!", description="\n".join(lines), color=discord.Color.gold())
     await ctx.send(embed=embed)
 
-@bot.hybrid_command(name="editprices", description="Staff Command: Calibrate configuration price thresholds for card store inventories")
-@is_staff()
-async def editprices(ctx, pack_3: int, pack_5: int, pack_10: int):
-    DATA["config"]["pack_3_price"] = pack_3
-    DATA["config"]["pack_5_price"] = pack_5
-    DATA["config"]["pack_10_price"] = pack_10
-    save_data()
-    await ctx.send(f"🔧 **Store Cost Parameters Calibrated!**\n• 3-Pack: `{pack_3}`\n• 5-Pack: `{pack_5}`\n• 10-Pack: `{pack_10}`")
 
-@bot.hybrid_command(name="editcoins", description="Staff Command: Modify currency files ledger values for a target player")
-@is_staff()
-@app_commands.choices(action=[
-    app_commands.Choice(name="Give", value="give"), 
-    app_commands.Choice(name="Take", value="take")
-])
-async def editcoins(ctx, action: str, player: discord.Member, amount: int):
-    p_id = str(player.id)
-    verify_user(p_id, player.display_name)
+@bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
+async def claimweekly(ctx):
+    if not DATA["global_cards"]: 
+        return await ctx.send("❌ Empty directories.")
+        
+    u_id = str(ctx.author.id)
+    verify_user(u_id, ctx.author.display_name)
     
-    if action == "give":
-        DATA["users"][p_id]["coins"] += amount
-    else:
-        DATA["users"][p_id]["coins"] = max(0, DATA["users"][p_id]["coins"] - amount)
+    now = datetime.now()
+    last = DATA["users"][u_id].get("last_weekly")
+    
+    if last and now < datetime.fromisoformat(last) + timedelta(days=7):
+        rem = (datetime.fromisoformat(last) + timedelta(days=7)) - now
+        return await ctx.send(f"⏳ Cooldown Active: Try again in {rem.days} days and {rem.seconds // 3600} hours.")
         
-    save_data()
-    await ctx.send(f"💰 Balance adjusted for {player.mention}. New Wallet Balance: {DATA['users'][p_id]['coins']} coins.")
+    pulled = draw_random_cards(3)
+    lines = []
+    for c_id in pulled:
+        card = DATA["global_cards"][c_id]
+        DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
+        lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
+        
+    DATA["users"][u_id]["last_weekly"] = now.isoformat()
 
-# ==============================================================================
-# --- LEDGER & INVENTORY INSPECTION TRACKERS ---
+    # ==============================================================================
+# --- LEDGER VAULTS MODULES ---
 # ==============================================================================
 
-@bot.hybrid_command(name="catalog", description="Public Command: Inspect card directory matrix profiles inside descending index pagination")
+@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix")
 async def catalog(ctx, page: int = 1):
-    if not DATA["global_cards"]:
-        return await ctx.send("📂 Directory Empty: Card frameworks completely uninitialized.")
+    if not DATA["global_cards"]: 
+        return await ctx.send("📂 Master database catalog uninitialized.")
         
-    sorted_cards = sorted(DATA["global_cards"].values(), key=lambda x: (RARITY_ORDER.index(x["rarity"]), -x["overall"]))
+    # Sort master cards from rarest to most common, and highest overall to lowest
+    sorted_cards = sorted(
+        DATA["global_cards"].items(), 
+        key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]), -x[1]["overall"])
+    )
     
     per_page = 8
-    max_pages = max(1, (len(sorted_cards) + per_page - 1) // per_page)
-    page = max(1, min(page, max_pages))
+    max_p = max(1, (len(sorted_cards) + per_page - 1) // per_page)
+    page = max(1, min(page, max_p))
     
-    start = (page - 1) * per_page
-    end = start + per_page
+    start_idx = (page - 1) * per_page
+    end_idx = page * per_page
     
-    desc_lines = []
-    for c in sorted_cards[start:end]:
-        desc_lines.append(f"• [{c['rarity']}] {c['name']} - {c['overall']} OVR")
+    lines = []
+    for card_id, c in sorted_cards[start_idx:end_idx]:
+        lines.append(f"• {c['name']} ({c['overall']} OVR) - [{c['rarity']}] | ID: `{card_id}`")
         
-    embed = discord.Embed(title="🏒 League Card Master Catalog", description="\n".join(desc_lines), color=discord.Color.blue())
-    embed.set_footer(text=f"Page {page}/{max_pages} | Total Item Profiles: {len(sorted_cards)}")
+    embed = discord.Embed(
+        title="🏒 Master Cards Blueprint Directory Catalog", 
+        description="\n".join(lines), 
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text=f"Page {page}/{max_p} | Total Item Profiles: {len(sorted_cards)}")
     await ctx.send(embed=embed)
 
 
-@bot.hybrid_command(name="inventory", description="Public Command: View active owned personal card stack layout rosters")
+@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage")
 async def inventory(ctx, player: discord.Member = None):
-    target = player or ctx.author
-    t_id = str(target.id)
-    verify_user(t_id, target.display_name)
+    t = player or ctx.author
+    t_id = str(t.id)
+    verify_user(t_id, t.display_name)
     
     inv = DATA["users"][t_id]["inventory"]
-    owned_cards = [c_id for c_id, count in inv.items() if count > 0 and c_id in DATA["global_cards"]]
+    valid = [c_id for c_id, count in inv.items() if count > 0 and c_id in DATA["global_cards"]]
     
-    if not owned_cards:
-        return await ctx.send(f"📂 {target.display_name} currently does not own any cataloged cards.")
+    if not valid: 
+        return await ctx.send(f"📂 {t.display_name} holds an empty collection.")
         
-    sorted_owned = sorted(owned_cards, key=lambda x: (RARITY_ORDER.index(DATA["global_cards"][x]["rarity"]), -DATA["global_cards"][x]["overall"]))
+    sorted_inv = sorted(
+        valid, 
+        key=lambda x: (RARITY_ORDER.index(DATA["global_cards"][x]["rarity"]), -DATA["global_cards"][x]["overall"])
+    )
     
-    desc_lines = []
-    for c_id in sorted_owned:
-        c = DATA["global_cards"][c_id]
-        desc_lines.append(f"• [{c['rarity']}] {c['name']} ({c['overall']} OVR) x{inv[c_id]}")
+    lines = []
+    for c_id in sorted_inv:
+        card_data = DATA["global_cards"][c_id]
+        lines.append(f"• {card_data['name']} ({card_data['overall']} OVR) - [{card_data['rarity']}] x{inv[c_id]} | ID: `{c_id}`")
         
-    embed = discord.Embed(title=f"🎒 Card Roster Vault: {target.display_name}", description="\n".join(desc_lines), color=discord.Color.dark_theme())
-    embed.add_field(name="Coins", value=f"{DATA['users'][t_id]['coins']} 🪙")
+    embed = discord.Embed(
+        title=f"🎒 Vault Storage: {t.display_name}", 
+        description="\n".join(lines), 
+        color=discord.Color.purple()
+    )
+    embed.add_field(name="Coins Wallet", value=f"{DATA['users'][t_id]['coins']} 🪙", inline=False)
     await ctx.send(embed=embed)
+
+    save_data()
+    await ctx.send(embed=discord.Embed(title="📅 Weekly Rewards Allocated!", description="\n".join(lines), color=discord.Color.green()))
+
+    grouped = {r: [] for r in RARITY_ORDER}
+    for c_id, c in DATA["global_cards"].items(): grouped[c["rarity"]].append(c_id)
 
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
 # ==============================================================================
 
 class TradeView(discord.ui.View):
-    def __init__(self, sender, receiver, s_card_id, r_card_id):
+    def __init__(self, sender, receiver, s_card, r_card):
         super().__init__(timeout=120)
         self.sender = sender
         self.receiver = receiver
-        self.s_card_id = s_card_id
-        self.r_card_id = r_card_id
+        self.s_card = s_card
+        self.r_card = r_card
 
     @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.receiver.id:
-            return await interaction.response.send_message("❌ You are not the recipient party targeted inside this trade layout loop.", ephemeral=True)
+        if interaction.user.id != self.receiver.id: 
+            return await interaction.response.send_message("❌ Target party authorization bind error.", ephemeral=True)
             
         s_id, r_id = str(self.sender.id), str(self.receiver.id)
         s_inv = DATA["users"][s_id]["inventory"]
         r_inv = DATA["users"][r_id]["inventory"]
         
-        if s_inv.get(self.s_card_id, 0) < 1 or r_inv.get(self.r_card_id, 0) < 1:
-            return await interaction.response.send_message("❌ Transaction Aborted: One or both parties no longer hold the trading target card allocation requirements.", ephemeral=True)
+        if s_inv.get(self.s_card, 0) < 1 or r_inv.get(self.r_card, 0) < 1:
+            return await interaction.response.send_message("❌ Items mismatch: Assets transferred positions outside tracking blocks.", ephemeral=True)
             
-        s_inv[self.s_card_id] -= 1
-        r_inv[self.r_card_id] -= 1
+        s_inv[self.s_card] -= 1
+        r_inv[self.r_card] -= 1
         
-        s_inv[self.r_card_id] = s_inv.get(self.r_card_id, 0) + 1
-        r_inv[self.s_card_id] = r_inv.get(self.s_card_id, 0) + 1
+        s_inv[self.r_card] = s_inv.get(self.r_card, 0) + 1
+        r_inv[self.s_card] = r_inv.get(self.s_card, 0) + 1
         
         save_data()
         self.stop()
-        await interaction.response.edit_message(content=f"✅ Trade Executed! Swap transaction finalized cleanly between {self.sender.mention} and {self.receiver.mention}.", view=None)
+        await interaction.response.edit_message(content=f"✅ Trade Executed! Swapped items successfully between {self.sender.mention} and {self.receiver.mention}.", view=None)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id not in (self.receiver.id, self.sender.id):
-            return await interaction.response.send_message("❌ Access Bound Violation.", ephemeral=True)
+        if interaction.user.id not in (self.sender.id, self.receiver.id): 
+            return await interaction.response.send_message("❌ Access Restricted: You are not a participant in this transaction loop.", ephemeral=True)
             
         self.stop()
-        await interaction.response.edit_message(content="❌ Trade Cancelled! Interaction cancelled by active processing authority.", view=None)
+        await interaction.response.edit_message(content="🛑 Trade Cancelled. Propose transaction rejected.", view=None)
 
 
-@bot.hybrid_command(name="trade", description="Public Command: Initiate an asset card swap proposal with another player")
-async def trade(ctx, target_player: discord.Member, your_card: discord.Member, their_card: discord.Member):
-    if target_player == ctx.author:
-        return await ctx.send("❌ Execution Blocked: You cannot cycle asset properties back into your own network matrix file.")
+@bot.hybrid_command(name="trade", description="Public Command: Initiate an asset swap transaction with another user")
+async def trade(ctx, target_player: discord.Member, your_card_id: str, their_card_id: str):
+    if target_player == ctx.author: 
+        return await ctx.send("❌ Self cycle blocked.")
         
     s_id, r_id = str(ctx.author.id), str(target_player.id)
-    yc_id, tc_id = str(your_card.id), str(their_card.id)
-    
     verify_user(s_id, ctx.author.display_name)
     verify_user(r_id, target_player.display_name)
     
-    if DATA["users"][s_id]["inventory"].get(yc_id, 0) < 1:
-        return await ctx.send(f"❌ Transaction Fault: You do not own a card blueprint profile for {your_card.display_name} inside your vault registry.")
+    if your_card_id not in DATA["global_cards"] or their_card_id not in DATA["global_cards"]:
+        return await ctx.send("❌ Error: One or both card identity ID strings do not exist.")
         
-    if DATA["users"][r_id]["inventory"].get(tc_id, 0) < 1:
-        return await ctx.send(f"❌ Transaction Fault: {target_player.display_name} does not own the requested asset card for {their_card.display_name}.")
+    if DATA["users"][s_id]["inventory"].get(your_card_id, 0) < 1: 
+        return await ctx.send("❌ Error: You do not own that item asset identifier.")
         
-    view = TradeView(ctx.author, target_player, yc_id, tc_id)
-    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} wants to trade their [{DATA['global_cards'][yc_id]['rarity']}] {your_card.display_name} for your [{DATA['global_cards'][tc_id]['rarity']}] {their_card.display_name}.", view=view)
+    if DATA["users"][r_id]["inventory"].get(their_card_id, 0) < 1: 
+        return await ctx.send("❌ Error: Target user does not own requested item asset.")
+        
+    view = TradeView(ctx.author, target_player, your_card_id, their_card_id)
+    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} wants to swap their {DATA['global_cards'][your_card_id]['name']} ({your_card_id}) for your {DATA['global_cards'][their_card_id]['name']} ({their_card_id}). Do you accept?", view=view)
 
 # ==============================================================================
-# --- MATCH ENGINE STACK AND QUEUE SYSTEM ---
+# --- INTERACTION TRADING MODULES ---
 # ==============================================================================
 
-# ==============================================================================
-# --- COMPETITIVE MATCHMAKING QUEUE ENGINE ---
-# ==============================================================================
+class TradeView(discord.ui.View):
+    def __init__(self, sender, receiver, s_card, r_card):
+        super().__init__(timeout=120)
+        self.sender = sender
+        self.receiver = receiver
+        self.s_card = s_card
+        self.r_card = r_card
 
-# Ensure global queue list trackers exist at the top of your script:
-if 'ACTIVE_QUEUES' not in globals():
-    ACTIVE_QUEUES = {1: [], 2: [], 3: []}
+    @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.receiver.id: 
+            return await interaction.response.send_message("❌ Target party authorization bind error.", ephemeral=True)
+            
+        s_id, r_id = str(self.sender.id), str(self.receiver.id)
+        s_inv = DATA["users"][s_id]["inventory"]
+        r_inv = DATA["users"][r_id]["inventory"]
+        
+        if s_inv.get(self.s_card, 0) < 1 or r_inv.get(self.r_card, 0) < 1:
+            return await interaction.response.send_message("❌ Items mismatch: Assets transferred positions outside tracking blocks.", ephemeral=True)
+            
+        s_inv[self.s_card] -= 1
+        r_inv[self.r_card] -= 1
+        
+        s_inv[self.r_card] = s_inv.get(self.r_card, 0) + 1
+        r_inv[self.s_card] = r_inv.get(self.s_card, 0) + 1
+        
+        save_data()
+        self.stop()
+        await interaction.response.edit_message(content=f"✅ Trade Executed! Swapped items successfully between {self.sender.mention} and {self.receiver.mention}.", view=None)
 
-def make_queue_embed(q_type: int) -> discord.Embed:
-    """Helper generator to render the active waiting pool display layout."""
-    player_ids = ACTIVE_QUEUES.get(q_type, [])
-    capacity = q_type * 2
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in (self.sender.id, self.receiver.id): 
+            return await interaction.response.send_message("❌ Access Restricted: You are not a participant in this transaction loop.", ephemeral=True)
+            
+        self.stop()
+        await interaction.response.edit_message(content="🛑 Trade Cancelled. Propose transaction rejected.", view=None)
+
+
+@bot.hybrid_command(name="trade", description="Public Command: Initiate an asset swap transaction with another user")
+async def trade(ctx, target_player: discord.Member, your_card_id: str, their_card_id: str):
+    if target_player == ctx.author: 
+        return await ctx.send("❌ Self cycle blocked.")
+        
+    s_id, r_id = str(ctx.author.id), str(target_player.id)
+    verify_user(s_id, ctx.author.display_name)
+    verify_user(r_id, target_player.display_name)
     
-    # Format mention string blocks for clear scannability
-    if player_ids:
-        player_list_str = "\n".join(f"• <@{p_id}>" for p_id in player_ids)
-    else:
-        player_list_str = "_No players currently waiting in this bracket pool._"
+    if your_card_id not in DATA["global_cards"] or their_card_id not in DATA["global_cards"]:
+        return await ctx.send("❌ Error: One or both card identity ID strings do not exist.")
         
-    embed = discord.Embed(
-        title=f"🏒 {q_type}v{q_type} Competitive Matchmaking Queue",
-        description="Select an action node trigger below to manage your registration slot inside the active waiting roster tree.",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name=f"👥 Registered Competitors ({len(player_ids)}/{capacity})", value=player_list_str, inline=False)
-    embed.set_footer(text="Match series initialization automatically triggers once player allocation bounds are full.")
-    return embed
+    if DATA["users"][s_id]["inventory"].get(your_card_id, 0) < 1: 
+        return await ctx.send("❌ Error: You do not own that item asset identifier.")
+        
+    if DATA["users"][r_id]["inventory"].get(their_card_id, 0) < 1: 
+        return await ctx.send("❌ Error: Target user does not own requested item asset.")
+        
+    view = TradeView(ctx.author, target_player, your_card_id, their_card_id)
+    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} wants to swap their {DATA['global_cards'][your_card_id]['name']} ({your_card_id}) for your {DATA['global_cards'][their_card_id]['name']} ({their_card_id}). Do you accept?", view=view)
+
+# ==============================================================================
+# --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
+# ==============================================================================
+
+@bot.hybrid_command(name="setstaffrole", description="Server Owner Command: Define the authority role required to access staff functions")
+@commands.has_permissions(administrator=True)
+async def setstaffrole(ctx, role: discord.Role):
+    DATA["config"]["staff_role_name"] = role.name
+    save_data()
+    await ctx.send(f"🛡️ **Staff Access Role Calibrated!** Users with the role **{role.name}** are now authorized to execute administrator ledger actions.")
 
 
-class QueueView(discord.ui.View):
-    def __init__(self, q_type: int):
+@bot.hybrid_command(name="editmatchreward", description="Staff Command: Calibrate the global currency payout size awarded to winning teams")
+@is_staff()
+async def editmatchreward(ctx, new_reward: int):
+    DATA["config"]["match_reward"] = max(0, new_reward)
+    save_data()
+    await ctx.send(f"🪙 **Match Payout Settings Saved!** Future match series victories will award `{new_reward}` coins per player.")
+
+
+# ==============================================================================
+# --- DYNAMIC MATCHMAKING QUEUE & VOTING RESOLUTION FRAMEWORK ---
+# ==============================================================================
+
+class MatchVoteView(discord.ui.View):
+    """Generates cross-squad confirmation interface blueprints so players self-report winners."""
+    def __init__(self, match_id: str):
         super().__init__(timeout=None)
-        self.q_type = q_type
+        self.match_id = match_id
 
-    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.primary, custom_id="join_queue_node_btn")
-    async def join_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def check_series_resolution(self, interaction: discord.Interaction):
+        match = DATA["matches"][self.match_id]
+        t1_votes = len(match["votes_t1"])
+        t2_votes = len(match["votes_t2"])
+        required_threshold = match["vote_threshold"]
+
+        # Run conditional branches once a clean consensus signature matches requirements
+        if t1_votes >= required_threshold:
+            await self.resolve_match_victory(interaction, winner_team=1)
+        elif t2_votes >= required_threshold:
+            await self.resolve_match_victory(interaction, winner_team=2)
+
+    async def resolve_match_victory(self, interaction: discord.Interaction, winner_team: int):
+        match = DATA["matches"][self.match_id]
+        win_ids = match["team1"] if winner_team == 1 else match["team2"]
+        lose_ids = match["team2"] if winner_team == 1 else match["team1"]
+        reward = DATA["config"].get("match_reward", 25)
+
+        # Process currency ledger deposits and increment win metrics records
+        for p_id in win_ids:
+            p_str = str(p_id)
+            verify_user(p_str, f"Player {p_str}")
+            DATA["users"][p_str]["coins"] += reward
+            DATA["users"][p_str]["wins"] += 1
+
+        for p_id in lose_ids:
+            p_str = str(p_id)
+            verify_user(p_str, f"Player {p_str}")
+            DATA["users"][p_str]["losses"] += 1
+
+        # Safely remove active game tracking roles configurations flags
+        m_role_id = DATA["config"].get("match_role_id")
+        m_role = interaction.guild.get_role(int(m_role_id)) if m_role_id else None
+        if m_role:
+            for p_id in (win_ids + lose_ids):
+                member = interaction.guild.get_member(p_id)
+                if member: 
+                    await member.remove_roles(m_role)
+
+        # Decommission the designated text channel environment
+        channel = interaction.guild.get_channel(match["channel_id"])
+        
+        # Unlink working index targets before dissolving structural rooms
+        del DATA["matches"][self.match_id]
+        save_data()
+
+        await interaction.channel.send(f"🎉 **Match Series Clear!** Consensus reached. Team {winner_team} wins the match! Competitors awarded `{reward}` coins.")
+        if channel:
+            await channel.delete(reason=f"Automated System Resolution: Match #{self.match_id} completed via secure user vote.")
+
+    @discord.ui.button(label="Vote Team 1 (Home) Won", style=discord.ButtonStyle.success, custom_id="vote_team_1_btn")
+    async def vote_t1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        m_str = self.match_id
+        if m_str not in DATA["matches"]:
+            return await interaction.response.send_message("❌ This active match routing profile has already been dissolved.", ephemeral=True)
+
+        match = DATA["matches"][m_str]
+        all_players = match["team1"] + match["team2"]
+
+        if interaction.user.id not in all_players:
+            return await interaction.response.send_message("❌ Access Restricted: Only active competitors inside this series are authorized to vote.", ephemeral=True)
+
         u_id = interaction.user.id
-        queue = ACTIVE_QUEUES[self.q_type]
-        capacity = self.q_type * 2
-        
-        if u_id in queue:
-            return await interaction.response.send_message("⚠️ Tracking Error: You are already registered inside this specific match waiting pool loop.", ephemeral=True)
-            
-        queue.append(u_id)
-        
-        # Allocate server role metrics if configured inside database tracking rules
-        q_role_id = DATA["config"].get("queue_role_id")
-        if q_role_id:
-            role = interaction.guild.get_role(int(q_role_id))
-            if role: 
-                await interaction.user.add_roles(role)
-                
-        # Re-render base UI layout and check initialization conditions
-        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
-        
-        if len(queue) >= capacity:
-            await trigger_match_initialization(interaction.guild, self.q_type)
+        if u_id in match["votes_t1"] or u_id in match["votes_t2"]:
+            return await interaction.response.send_message("⚠️ State Tracking: You have already submitted a confirmation ballot for this match.", ephemeral=True)
 
-    @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.danger, custom_id="leave_queue_node_btn")
-    async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        match["votes_t1"].append(u_id)
+        save_data()
+
+        await interaction.response.send_message(f"🗳️ Your confirmation vote for **Team 1** has been recorded. Current standing: ({len(match['votes_t1'])} / {len(match['votes_t2'])})", ephemeral=False)
+        await self.check_series_resolution(interaction)
+
+    @discord.ui.button(label="Vote Team 2 (Away) Won", style=discord.ButtonStyle.danger, custom_id="vote_team_2_btn")
+    async def vote_t2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        m_str = self.match_id
+        if m_str not in DATA["matches"]:
+            return await interaction.response.send_message("❌ This active match routing profile has already been dissolved.", ephemeral=True)
+
+        match = DATA["matches"][m_str]
+        all_players = match["team1"] + match["team2"]
+
+        if interaction.user.id not in all_players:
+            return await interaction.response.send_message("❌ Access Restricted: Only active competitors inside this series are authorized to vote.", ephemeral=True)
+
         u_id = interaction.user.id
-        queue = ACTIVE_QUEUES[self.q_type]
-        
-        if u_id not in queue:
-            return await interaction.response.send_message("❌ Error: You are not currently registered inside this active queue waiting tree.", ephemeral=True)
-            
-        queue.remove(u_id)
-        
-        # Strip queue roles cleanly if tracked
-        q_role_id = DATA["config"].get("queue_role_id")
-        if q_role_id:
-            role = interaction.guild.get_role(int(q_role_id))
-            if role: 
-                await interaction.user.remove_roles(role)
-                
-        # Update live screen layout changes instantly
-        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
+        if u_id in match["votes_t1"] or u_id in match["votes_t2"]:
+            return await interaction.response.send_message("⚠️ State Tracking: You have already submitted a confirmation ballot for this match.", ephemeral=True)
 
+        match["votes_t2"].append(u_id)
+        save_data()
 
-async def trigger_match_initialization(guild: discord.Guild, q_type: int):
-    # Snapshot queue values state and clear volatile working arrays
-    queue = ACTIVE_QUEUES[q_type].copy()
-    ACTIVE_QUEUES[q_type].clear()
-    
-    # Shuffle to guarantee non-biased random team selection processing
-    random.shuffle(queue)
-    
-    team_size = q_type
-    team1_ids = queue[:team_size]
-    team2_ids = queue[team_size:]
-    
-    m_id = DATA["next_match_id"]
-    DATA["next_match_id"] += 1
-    
-    # Clear tracking role configurations flags
-    q_role_id = DATA["config"].get("queue_role_id")
-    m_role_id = DATA["config"].get("match_role_id")
-    
-    q_role = guild.get_role(int(q_role_id)) if q_role_id else None
-    m_role = guild.get_role(int(m_role_id)) if m_role_id else None
-    
-    # Lock channel permissions exclusively to the matched players and staff
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        guild.me: discord.PermissionOverwrite(read_messages=True)
-    }
-    
-    for p_id in queue:
-        member = guild.get_member(p_id)
-        if member:
-            overwrites[member] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-            if q_role: 
-                await member.remove_roles(q_role)
-            if m_role: 
-                await member.add_roles(m_role)
-                
-    category = discord.utils.get(guild.categories, name="Active Matches")
-    if not category:
-        category = await guild.create_category("Active Matches")
-        
-    channel = await guild.create_text_channel(name=f"match-{m_id}", category=category, overwrites=overwrites)
-    
-    t1_names = [guild.get_member(p).display_name for p in team1_ids if guild.get_member(p)]
-    t2_names = [guild.get_member(p).display_name for p in team2_ids if guild.get_member(p)]
-    
-    DATA["matches"][str(m_id)] = {
-        "channel_id": channel.id,
-        "type": q_type,
-        "team1": team1_ids,
-        "team2": team2_ids
-    }
-    save_data()
-    
-    embed = discord.Embed(
-        title=f"⚡ Match Series #{m_id} Initialized!", 
-        color=discord.Color.red(), 
-        description="Format Setup Type: **Best of 3 Matches Series Blueprint**"
-    )
-    embed.add_field(name="🟢 Team 1 (Home)", value="\n".join(t1_names) or "Empty Thread Roster", inline=True)
-    embed.add_field(name="🔵 Team 2 (Away)", value="\n".join(t2_names) or "Empty Thread Roster", inline=True)
-    embed.set_footer(text="Staff administrators must execute /reportmatch to finalize these metrics manually.")
-    
-    await channel.send(content=" ".join(f"<@{p_id}>" for p_id in queue), embed=embed)
+        await interaction.response.send_message(f"🗳️ Your confirmation vote for **Team 2** has been recorded. Current standing: ({len(match['votes_t1'])} / {len(match['votes_t2'])})", ephemeral=False)
+        await self.check_series_resolution(interaction)
 
-
-@bot.hybrid_command(name="setupqueue", description="Staff Command: Spawn a dynamic interactive match-making interface link widget")
-@is_staff()
-@app_commands.choices(format_size=[
-    app_commands.Choice(name="1v1 Bracket Match", value=1), 
-    app_commands.Choice(name="2v2 Bracket Match", value=2), 
-    app_commands.Choice(name="3v3 Bracket Match", value=3)
-])
-async def setupqueue(ctx, format_size: int):
-    view = QueueView(format_size)
-    embed = make_queue_embed(format_size)
-    await ctx.send(embed=embed, view=view)
-
-async def setupqueue(ctx, format_size: int):
-    view = QueueView(format_size)
-    embed = discord.Embed(
-        title=f"🏒 {format_size}v{format_size} Competitive League Queue", 
-        description="Select the action node trigger button below to register your tracking spot inside the waiting roster pool.", 
-        color=discord.Color.blue()
-    )
-    await ctx.send(embed=embed, view=view)
 
 # ==============================================================================
-# --- STAFF ADMINISTRATION UTILITY & LOGISTICS CONTROL ENDPOINTS ---
+# --- MAIN INITIALIZER RUNTIME DISPATCH SYSTEM ---
 # ==============================================================================
 
-@bot.hybrid_command(name="reportmatch", description="Staff Command: Record final scores, assign rewards, and safely decommission channels")
-@is_staff()
-@app_commands.choices(winner=[
-    app_commands.Choice(name="Team 1 (Home)", value=1), 
-    app_commands.Choice(name="Team 2 (Away)", value=2)
-])
-async def reportmatch(ctx, match_number: int, winner: int):
-    m_str = str(match_number)
-    if m_str not in DATA["matches"]:
-        return await ctx.send("❌ Processing Error: Target identifier match reference mapping missing inside dictionary registry files.")
-        
-    match = DATA["matches"][m_str]
-    win_team = match["team1"] if winner == 1 else match["team2"]
-    lose_team = match["team2"] if winner == 1 else match["team1"]
-    reward = DATA["config"]["match_reward"]
-    
-    # Process wallet arrays and update win records
-    for p_id in win_team:
-        p_str = str(p_id)
-        verify_user(p_str, f"User {p_str}")
-        DATA["users"][p_str]["coins"] += reward
-        DATA["users"][p_str]["wins"] += 1
-        
-    for p_id in lose_team:
-        p_str = str(p_id)
-        verify_user(p_str, f"User {p_str}")
-        DATA["users"][p_str]["losses"] += 1
-        
-    # Strip Active Match Role assignments
-    m_role = ctx.guild.get_role(int(DATA["config"]["match_role_id"])) if DATA["config"]["match_role_id"] else None
-    if m_role:
-        for p_id in (win_team + lose_team):
-            member = ctx.guild.get_member(p_id)
-            if member: 
-                await member.remove_roles(m_role)
-                
-    # Purge allocated channel targets securely
-    channel = ctx.guild.get_channel(match["channel_id"])
-    if channel:
-        await channel.delete(reason=f"Administrative Closure: Match #{match_number} completed.")
-        
-    del DATA["matches"][m_str]
-    save_data()
-    await ctx.send(f"✅ Match #{match_number} Logged! Winners received {reward} coins. Active instance room successfully dissolved.")
+@bot.event
+async def on_ready():
+    load_data()
+    print(f"🏒 Master Card Collector & Match Queue Core Activated: {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"🔄 Successfully synchronized {len(synced)} operational slash layouts.")
+    except Exception as e:
+        print(f"Sync Fault Encountered: {e}")
 
-
-@bot.hybrid_command(name="cancelmatch", description="Staff Command: Terminate an active match instance and purge the designated text room")
-@is_staff()
-async def cancelmatch(ctx, match_number: int):
-    m_str = str(match_number)
-    if m_str not in DATA["matches"]:
-        return await ctx.send("❌ Error: Target match identifier not tracking inside active operational trees.")
-        
-    match = DATA["matches"][m_str]
-    m_role = ctx.guild.get_role(int(DATA["config"]["match_role_id"])) if DATA["config"]["match_role_id"] else None
-    
-    if m_role:
-        for p_id in (match["team1"] + match["team2"]):
-            member = ctx.guild.get_member(p_id)
-            if member: 
-                await member.remove_roles(m_role)
-                
-    channel = ctx.guild.get_channel(match["channel_id"])
-    if channel: 
-        await channel.delete(reason="Administrative Override Action: Cancel Match standard procedure invocation.")
-        
-    del DATA["matches"][m_str]
-    save_data()
-    await ctx.send(f"🛑 Match #{match_number} Cancelled! Structural tracking parameters erased.")
-
-
-@bot.hybrid_command(name="substitute", description="Staff Command: Swap an active player out for a replacement substitute player")
-@is_staff()
-async def substitute(ctx, match_number: int, current_player: discord.Member, new_player: discord.Member):
-    m_str = str(match_number)
-    if m_str not in DATA["matches"]:
-        return await ctx.send("❌ Target match mapping instance completely dead.")
-        
-    match = DATA["matches"][m_str]
-    team_key = None
-    
-    if current_player.id in match["team1"]: 
-        team_key = "team1"
-    elif current_player.id in match["team2"]: 
-        team_key = "team2"
-        
-    if not team_key:
-        return await ctx.send(f"❌ Error: {current_player.display_name} is not assigned to this match.")
-        
-    idx = match[team_key].index(current_player.id)
-    match[team_key][idx] = new_player.id
-    save_data()
-    
-    # Sync permissions
-    channel = ctx.guild.get_channel(match["channel_id"])
-    if channel:
-        await channel.set_permissions(current_player, overwrite=None)
-        await channel.set_permissions(new_player, read_messages=True, send_messages=True)
-        
-    m_role = ctx.guild.get_role(int(DATA["config"]["match_role_id"])) if DATA["config"]["match_role_id"] else None
-    if m_role:
-        await current_player.remove_roles(m_role)
-        await new_player.add_roles(m_role)
-        
-    await ctx.send(f"🔄 Roster Swap Complete! {new_player.mention} replaces {current_player.mention} in Match #{match_number}.")
-
-
-@bot.hybrid_command(name="removefromqueue", description="Staff Command: Eject a user from all volatile waiting queues manually")
-@is_staff()
-async def removefromqueue(ctx, player: discord.Member):
-    removed = False
-    for q_type, users in ACTIVE_QUEUES.items():
-        if player.id in users:
-            users.remove(player.id)
-            removed = True
-            
-    q_role = ctx.guild.get_role(int(DATA["config"]["queue_role_id"])) if DATA["config"]["queue_role_id"] else None
-    if q_role: 
-        await player.remove_roles(q_role)
-        
-    if removed: 
-        await ctx.send(f"🗑️ Ejected {player.mention} from active matchmaking waiting queues safely.")
-    else: 
-        await ctx.send("⚠️ State: Player was not found in any active queue containers.")
-
-
-@bot.hybrid_command(name="configureroles", description="Staff Command: Map tracking roles configuration identifiers")
-@is_staff()
-async def configureroles(ctx, queue_role: discord.Role, match_role: discord.Role):
-    DATA["config"]["queue_role_id"] = str(queue_role.id)
-    DATA["config"]["match_role_id"] = str(match_role.id)
-    save_data()
-    await ctx.send(f"⚙️ Configurations Setup Success: Queue tracking mapped to {queue_role.name} and Active Match tracking mapped to {match_role.name}.")
-
-# --- Start Services ---
+# Start background Flask server infrastructure to catch cron-job.org keep-alive pings
 keep_alive()
-bot.run(TOKEN)
 
+# Establish primary operational login interface token connectivity
+bot.run(TOKEN)
 
