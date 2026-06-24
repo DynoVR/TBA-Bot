@@ -114,6 +114,7 @@ def save_data():
         put_req = requests.put(url, headers=headers, json=payload)
         if put_req.status_code in:
             print("💾 Database securely backed up to GitHub Repository successfully!")
+
         else:
             print(f"GitHub Sync Failed: {put_req.text}")
             
