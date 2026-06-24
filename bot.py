@@ -863,7 +863,6 @@ async def setupqueue(ctx, format_size: int):
 # --- NEATQUE RESULT SCRAPER EVENT LISTENER ---
 # ==============================================================================
 
-
 @bot.event
 async def on_message(message: discord.Message):
     # 1. Ignore messages sent by your own bot to prevent feedback loops
@@ -894,65 +893,15 @@ async def on_message(message: discord.Message):
         if "winner" not in text_to_scan.lower():
             return
 
-        winning_user_ids = []
-        losing_user_ids = []
-
-        # Download and update server member cache tables instantly
-        if message.guild:
-            try:
-                await message.guild.query_members(limit=250, cache=True)
-            except Exception as e:
-                print(f"Member cache fault: {e}")
-
-        # 🎯 FIX: EXPLICIT SIDE-BY-SIDE COLUMN TEXT PARSER
-        # Pattern 1: Matches any text starting with @ up to a (+) indicator
-        # Example text: "@Dyno +31.2" -> extracts "Dyno"
-        winners_found = re.findall(r"@([^+\-\n]+)\s*\+[\d\.]+", text_to_scan)
+        # 🎯 FIX: DISCORD MENTION ID REGEX ENGINE
+        # This matches real clickable mentions (<@12345678>) up to their positive/negative symbols
+        # Pattern A: Finds clickable mentions followed anywhere by a '+' indicator
+        winning_user_ids = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
         
-        # Pattern 2: Matches any text starting with @ up to a (-) indicator
-        # Example text: "@packa69.co 💍 🏆 -14.8" -> extracts "packa69.co 💍 🏆"
-        losers_found = re.findall(r"@([^+\-\n]+)\s*\-[\d\.]+", text_to_scan)
+        # Pattern B: Finds clickable mentions followed anywhere by a '-' indicator
+        losing_user_ids = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
 
-        # Connect extracted winner text names to real member profile accounts
-        for name_str in winners_found:
-            clean_name = name_str.strip()
-            # Strip extra spaces or trailing artifacts out of the search target
-            clean_name = re.sub(r"\s+", " ", clean_name)
-            
-            member = discord.utils.get(message.guild.members, display_name=clean_name) or \
-                     discord.utils.get(message.guild.members, name=clean_name)
-                     
-            if not member and message.guild:
-                search_text = clean_line.lower() if 'clean_line' in locals() else clean_name.lower()
-                for m in message.guild.members:
-                    if search_text in m.display_name.lower() or search_text in m.name.lower():
-                        member = m
-                        break
-            if member:
-                p_id_str = str(member.id)
-                if p_id_str not in winning_user_ids:
-                    winning_user_ids.append(p_id_str)
-
-        # Connect extracted loser text names to real member profile accounts
-        for name_str in losers_found:
-            clean_name = name_str.strip()
-            clean_name = re.sub(r"\s+", " ", clean_name)
-            
-            member = discord.utils.get(message.guild.members, display_name=clean_name) or \
-                     discord.utils.get(message.guild.members, name=clean_name)
-                     
-            if not member and message.guild:
-                search_text = clean_name.lower()
-                for m in message.guild.members:
-                    if search_text in m.display_name.lower() or search_text in m.name.lower():
-                        member = m
-                        break
-            if member:
-                p_id_str = str(member.id)
-                if p_id_str not in losing_user_ids:
-                    losing_user_ids.append(p_id_str)
-
-        # 3. Apply rewards data values onto valid players found inside the registries
+        # 3. Apply rewards directly using the extracted account numbers
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -969,9 +918,10 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Save balances permanently back to GitHub repository files
+            # Commit adjustments immediately to the permanent GitHub cloud save
             save_data()
 
+            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
                     f"🪙 **NeatQue Automated Link Synced!** Match column data processed.\n"
@@ -979,6 +929,7 @@ async def on_message(message: discord.Message):
                     f"{', '.join(awarded_mentions)}"
                 )
 
+    # 4. Critical baseline logic required to continue keeping prefix text commands responsive
     await bot.process_commands(message)
 
 # --- Start Services ---
