@@ -844,16 +844,20 @@ async def setupqueue(ctx, format_size: int):
 
 @bot.event
 async def on_message(message: discord.Message):
+    # 1. Protect against infinite response feedback loops
     if message.author == bot.user:
         return
 
-    # Listen directly to NeatQue bot outputs to harvest player match standings
-    if message.author.name == "NeatQue" or message.author.id == 1152011039868612660:
+    # 2. Strict Application ID Verification Filter
+    # Verified unique gateway fingerprint for NeatQue: 857633321064595466
+    if message.author.id == 857633321064595466 or "neatque" in message.author.name.lower():
         text_to_scan = ""
         
+        # Harvest plain message strings
         if message.content:
             text_to_scan += message.content + "\n"
             
+        # Extract metadata content out of colorful embed templates
         if message.embeds:
             for embed in message.embeds:
                 if embed.description:
@@ -861,13 +865,37 @@ async def on_message(message: discord.Message):
                 for field in embed.fields:
                     text_to_scan += f"{field.name} {field.value}\n"
 
-        # Regex blueprints scanning mentions mapped to arithmetic + or - symbols
-        winner_pattern = r"<@!?(\d+)>\s*\+"
-        winning_user_ids = re.findall(winner_pattern, text_to_scan)
+        # 🎯 Scanner Node A: Look for user mentions tied to a (+) change value
+        winner_mention_pattern = r"<@!?(\d+)>\s*\+"
+        winning_user_ids = re.findall(winner_mention_pattern, text_to_scan)
 
-        loser_pattern = r"<@!?(\d+)>\s*-"
-        losing_user_ids = re.findall(loser_pattern, text_to_scan)
+        # 🎯 Scanner Node B: Look for user mentions tied to a (-) change value
+        loser_mention_pattern = r"<@!?(\d+)>\s*-"
+        losing_user_ids = re.findall(loser_mention_pattern, text_to_scan)
 
+        # 🎯 Scanner Node C: Parse plain text nicknames if NeatQue omits user mentions
+        if not winning_user_ids:
+            text_name_pattern = r"([\w\.\-\s]+)\s*\+"
+            found_names = re.findall(text_name_pattern, text_to_scan)
+            
+            for name in found_names:
+                clean_name = name.strip()
+                member = discord.utils.get(message.guild.members, display_name=clean_name) or discord.utils.get(message.guild.members, name=clean_name)
+                if member and str(member.id) not in winning_user_ids:
+                    winning_user_ids.append(str(member.id))
+
+        # 🎯 Scanner Node D: Parse plain text nicknames for losers
+        if not losing_user_ids:
+            text_lose_pattern = r"([\w\.\-\s]+)\s*\-"
+            found_lose_names = re.findall(text_lose_pattern, text_to_scan)
+            
+            for name in found_lose_names:
+                clean_name = name.strip()
+                member = discord.utils.get(message.guild.members, display_name=clean_name) or discord.utils.get(message.guild.members, name=clean_name)
+                if member and str(member.id) not in losing_user_ids:
+                    losing_user_ids.append(str(member.id))
+
+        # 3. Process records modifications onto valid found identities
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -884,18 +912,19 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Push permanent cloud backup saves instantly
+            # Commit adjustments immediately to the permanent GitHub cloud save
             save_data()
 
+            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Leaderboard Sync!** Detected match stats resolution.\n"
-                    f"The following winners have been credited with **{reward} coins**: "
+                    f"🪙 **NeatQue Automated Link Synced!**\n"
+                    f"The following match winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
 
+    # 4. Critical baseline logic required to continue keeping prefix text commands responsive
     await bot.process_commands(message)
-
 
 # --- Start Services ---
 keep_alive()
