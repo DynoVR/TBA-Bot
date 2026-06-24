@@ -61,9 +61,64 @@ DATA = {
     }
 }
 
+import requests
+import base64
+
+# --- GitHub Auto-Sync Save System Configurations ---
+# Replace these strings with your exact GitHub repository details
+GITHUB_USERNAME = "DynoVR"
+GITHUB_REPO = "hockey-bot"
+GITHUB_FILE_PATH = "card_league_database.json"
+
+# IMPORTANT: You must add a 'GH_TOKEN' variable to your Render Environment tab!
+GH_TOKEN = os.environ.get("GH_TOKEN")
+
 def save_data():
-    with open(DATABASE_FILE, "w") as f:
-        json.dump(DATA, f, indent=4)
+    """Saves data locally and automatically syncs it back to your GitHub Repo permanently."""
+    # 1. Save data locally first
+    try:
+        with open(DATABASE_FILE, "w") as f:
+            json.dump(DATA, f, indent=4)
+    except Exception as e:
+        print(f"Local Save Error: {e}")
+
+    # 2. Skip GitHub sync if the token configuration isn't set up yet
+    if not GH_TOKEN:
+        print("⚠️ Warning: GH_TOKEN missing in Render Environment. Data saved ONLY locally (Volatile).")
+        return
+
+    # 3. Use GitHub API to push the JSON file directly back to your repository
+    try:
+        url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = {
+            "Authorization": f"token {GH_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        # Get the current file's 'sha' tag (required by GitHub to update an existing file)
+        get_req = requests.get(url, headers=headers)
+        sha = get_req.json().get("sha") if get_req.status_code == 200 else None
+        
+        # Format the upload payload structures
+        content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
+        encoded_content = base64.b64encode(content_bytes).decode('utf-8')
+        
+        payload = {
+            "message": "🔄 Automated Live Database State Backup Sync",
+            "content": encoded_content
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        # Execute the commit update action
+        put_req = requests.put(url, headers=headers, json=payload)
+        if put_req.status_code in:
+            print("💾 Database securely backed up to GitHub Repository successfully!")
+        else:
+            print(f"GitHub Sync Failed: {put_req.text}")
+            
+    except Exception as e:
+        print(f"GitHub Remote Cloud Sync Fault: {e}")
 
 def load_data():
     global DATA
