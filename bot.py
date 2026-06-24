@@ -844,58 +844,70 @@ async def setupqueue(ctx, format_size: int):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # 1. Protect against infinite response feedback loops
+    # 1. Ignore messages sent by your own bot to prevent endless loops
     if message.author == bot.user:
         return
 
-    # 2. Strict Application ID Verification Filter
-    # Verified unique gateway fingerprint for NeatQue: 857633321064595466
+    # 2. Strict Filter: Listen if the sender is NeatQue's ID or Name
     if message.author.id == 857633321064595466 or "neatque" in message.author.name.lower():
         text_to_scan = ""
         
-        # Harvest plain message strings
+        # Scrape raw text content
         if message.content:
             text_to_scan += message.content + "\n"
             
-        # Extract metadata content out of colorful embed templates
+        # Scrape EVERY string layer inside a Discord Embed Box
         if message.embeds:
             for embed in message.embeds:
+                if embed.title:
+                    text_to_scan += embed.title + "\n"
                 if embed.description:
                     text_to_scan += embed.description + "\n"
+                if embed.author and embed.author.name:
+                    text_to_scan += embed.author.name + "\n"
+                if embed.footer and embed.footer.text:
+                    text_to_scan += embed.footer.text + "\n"
                 for field in embed.fields:
                     text_to_scan += f"{field.name} {field.value}\n"
 
-        # 🎯 Scanner Node A: Look for user mentions tied to a (+) change value
-        winner_mention_pattern = r"<@!?(\d+)>\s*\+"
-        winning_user_ids = re.findall(winner_mention_pattern, text_to_scan)
+        winning_user_ids = []
+        losing_user_ids = []
 
-        # 🎯 Scanner Node B: Look for user mentions tied to a (-) change value
-        loser_mention_pattern = r"<@!?(\d+)>\s*-"
-        losing_user_ids = re.findall(loser_mention_pattern, text_to_scan)
+        # 🎯 ADVANCED CLEAN NAME PARSER
+        # Splitting the text by line to inspect exactly who got a + or a -
+        for line in text_to_scan.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
 
-        # 🎯 Scanner Node C: Parse plain text nicknames if NeatQue omits user mentions
-        if not winning_user_ids:
-            text_name_pattern = r"([\w\.\-\s]+)\s*\+"
-            found_names = re.findall(text_name_pattern, text_to_scan)
+            # Check if this line indicates a stats change
+            has_plus = "+" in line
+            has_minus = "-" in line
             
-            for name in found_names:
-                clean_name = name.strip()
-                member = discord.utils.get(message.guild.members, display_name=clean_name) or discord.utils.get(message.guild.members, name=clean_name)
-                if member and str(member.id) not in winning_user_ids:
-                    winning_user_ids.append(str(member.id))
+            if not has_plus and not has_minus:
+                continue
 
-        # 🎯 Scanner Node D: Parse plain text nicknames for losers
-        if not losing_user_ids:
-            text_lose_pattern = r"([\w\.\-\s]+)\s*\-"
-            found_lose_names = re.findall(text_lose_pattern, text_to_scan)
+            # Clean out common symbols, numbers in parentheses, and the trailing point metrics
+            # Example text conversion: "@Tent💍🐗 +40.0 (33.7)" -> "@Tent💍🐗"
+            clean_line = re.sub(r"\([^\)]+\)", "", line)  # Removes everything inside parenthetical bounds (...)
+            clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  # Removes the points flag change (+35.3, -17.0, etc.)
+            clean_line = clean_line.replace("@", "").strip()  # Clears out the literal symbol prefix text
+
+            if not clean_line:
+                continue
+
+            # Match the cleaned plain text string directly to a server member profile
+            member = discord.utils.get(message.guild.members, display_name=clean_line) or \
+                     discord.utils.get(message.guild.members, name=clean_line)
             
-            for name in found_lose_names:
-                clean_name = name.strip()
-                member = discord.utils.get(message.guild.members, display_name=clean_name) or discord.utils.get(message.guild.members, name=clean_name)
-                if member and str(member.id) not in losing_user_ids:
-                    losing_user_ids.append(str(member.id))
+            if member:
+                p_id_str = str(member.id)
+                if has_plus and p_id_str not in winning_user_ids:
+                    winning_user_ids.append(p_id_str)
+                elif has_minus and p_id_str not in losing_user_ids:
+                    losing_user_ids.append(p_id_str)
 
-        # 3. Process records modifications onto valid found identities
+        # 3. Award the matching users inside your league database ledger
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -912,10 +924,9 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Commit adjustments immediately to the permanent GitHub cloud save
+            # Commit updates directly back to GitHub Cloud data files
             save_data()
 
-            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
                     f"🪙 **NeatQue Automated Link Synced!**\n"
@@ -923,7 +934,6 @@ async def on_message(message: discord.Message):
                     f"{', '.join(awarded_mentions)}"
                 )
 
-    # 4. Critical baseline logic required to continue keeping prefix text commands responsive
     await bot.process_commands(message)
 
 # --- Start Services ---
