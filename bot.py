@@ -865,19 +865,23 @@ async def setupqueue(ctx, format_size: int):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # 1. Ignore messages sent by your own bot to prevent endless loops
+    # 1. Ignore messages sent by your own bot to prevent loops
     if message.author == bot.user:
         return
 
-    # 2. Strict Filter: Listen if the sender is NeatQue's ID or Name
-    if message.author.id == 857633321064595466 or "neatque" in message.author.name.lower():
+    # 2. Universal Sender Filter: Run if the username is 'NeatQue', if it is a Webhook, OR matches the App ID
+    is_neatque = "neatque" in message.author.name.lower()
+    is_webhook = message.webhook_id is not None
+    is_bot = message.author.bot
+
+    if is_neatque or is_webhook or is_bot or message.author.id == 857633321064595466:
         text_to_scan = ""
         
         # Scrape raw text content
         if message.content:
             text_to_scan += message.content + "\n"
             
-        # Scrape EVERY string layer inside a Discord Embed Box
+        # Scrape EVERY string layer inside a Discord Embed Box (including Webhook layers)
         if message.embeds:
             for embed in message.embeds:
                 if embed.title:
@@ -891,23 +895,21 @@ async def on_message(message: discord.Message):
                 for field in embed.fields:
                     text_to_scan += f"{field.name} {field.value}\n"
 
-        # 🚨 FIX: Strict Gatekeeper Verification
-        # Check if the message actually contains the queue winner confirmation keywords.
-        # If it doesn't say "winner", stop processing immediately so it ignores general queue traffic.
+        # 🚨 Gatekeeper Check: Exit early if this isn't a final match results scorecard
         if "winner" not in text_to_scan.lower():
             return
 
         winning_user_ids = []
         losing_user_ids = []
 
-        # Force the bot to download and cache the live server member list
+        # Download and cache live server member names
         if message.guild:
             try:
                 await message.guild.query_members(limit=250, cache=True)
             except Exception as e:
-                print(f"Member chunking fault: {e}")
+                print(f"Member cache fault: {e}")
 
-        # ADVANCED CLEAN NAME PARSER
+        # ADVANCED TEXT EXTRACTOR
         for line in text_to_scan.split("\n"):
             line = line.strip()
             if not line:
@@ -919,7 +921,8 @@ async def on_message(message: discord.Message):
             if not has_plus and not has_minus:
                 continue
 
-            # Clean out common symbols, numbers in parentheses, and trailing scores
+            # Clean symbols, parentheticals, and extra point logs
+            # "@Dyno +35.3 (454.9)" -> "Dyno"
             clean_line = re.sub(r"\([^\)]+\)", "", line)  
             clean_line = re.sub(r"[\+\-]\s*\d+[\d\.]*", "", clean_line)  
             clean_line = clean_line.replace("@", "").strip()  
@@ -927,10 +930,11 @@ async def on_message(message: discord.Message):
             if not clean_line or len(clean_line) < 2:
                 continue
 
-            # Partial matching algorithm to connect truncated nicknames to server members
+            # Check for members matching the cleaned string text string
             member = discord.utils.get(message.guild.members, display_name=clean_line) or \
                      discord.utils.get(message.guild.members, name=clean_line)
                      
+            # Sub-string check for truncated nicknames (e.g. "Dyno" matching "DynoVR")
             if not member and message.guild:
                 search_text = clean_line.lower()
                 for m in message.guild.members:
@@ -947,7 +951,7 @@ async def on_message(message: discord.Message):
                 elif has_minus and p_id_str not in losing_user_ids:
                     losing_user_ids.append(p_id_str)
 
-        # 3. Award the matching users inside your league database ledger
+        # 3. Update balances inside the database
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -964,18 +968,18 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Commit updates directly back to GitHub Cloud data files
+            # Save data securely to GitHub cloud files
             save_data()
 
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Automated Link Synced!**\n"
-                    f"The following match winners have been credited with **{reward} coins**: "
+                    f"🪙 **NeatQue Automated Link Synced!** Match result parsed successfully.\n"
+                    f"The following winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
 
     await bot.process_commands(message)
-    
+
 # --- Start Services ---
 keep_alive()
 bot.run(TOKEN)
