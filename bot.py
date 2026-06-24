@@ -40,6 +40,9 @@ GH_TOKEN = os.environ.get("GH_TOKEN")
 # Ordered priority mapping for sorted card ledger structures
 RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
 
+# Global Tracker Container for Matchmaking Queues
+ACTIVE_QUEUES = {1: [], 2: [], 3: []}
+
 # --- Complete Consolidated Database System ---
 DATA = {
     "season_title": "TBA League",
@@ -60,13 +63,21 @@ DATA = {
         "match_reward": 25,
         "queue_role_id": None,
         "match_role_id": None,
-        "staff_role_id": None  # Dynamic staff configuration storage
+        "sell_prices": {
+            "Average": 10,
+            "Great": 20,
+            "Epic": 40,
+            "Insane": 75,
+            "Pro": 150,
+            "Juggernaut": 300,
+            "Otherworldly": 750,
+            "Specialty": 1500
+        }
     }
 }
 
-ACTIVE_QUEUES = {1: [], 2: [], 3: []}
-
 def save_data():
+    """Saves data locally and automatically syncs it back to your GitHub Repo permanently."""
     try:
         with open(DATABASE_FILE, "w") as f:
             json.dump(DATA, f, indent=4)
@@ -79,13 +90,22 @@ def save_data():
     try:
         url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
         headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        
         get_req = requests.get(url, headers=headers)
         sha = get_req.json().get("sha") if get_req.status_code == 200 else None
+        
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
+        
         payload = {"message": "🔄 Automated Live Database State Backup Sync", "content": encoded_content}
-        if sha: payload["sha"] = sha
-        requests.put(url, headers=headers, json=payload)
+        if sha: 
+            payload["sha"] = sha
+            
+        put_req = requests.put(url, headers=headers, json=payload)
+        if put_req.status_code in (200, 201):
+            print("💾 Database securely backed up to GitHub Repository successfully!")
+        else:
+            print(f"GitHub Sync Failed: {put_req.text}")
     except Exception as e:
         print(f"GitHub Cloud Sync Fault: {e}")
 
@@ -128,6 +148,7 @@ async def on_ready():
     print(f"🏒 Bot Online: Connected as {bot.user}")
     try:
         await bot.tree.sync()
+        print("🔄 Slash layout modules linked seamlessly.")
     except Exception as e:
         print(f"Sync Error: {e}")
 
@@ -502,8 +523,35 @@ async def editmatchreward(ctx, new_reward: int):
 # --- DYNAMIC MATCHMAKING QUEUE & VOTING RESOLUTION FRAMEWORK ---
 # ==============================================================================
 
+# ==============================================================================
+# --- COMPETITIVE MATCHMAKING QUEUE ENGINE ---
+# ==============================================================================
+
+def make_queue_embed(q_type: int) -> discord.Embed:
+    """Helper generator to render the active waiting pool display layout."""
+    player_ids = ACTIVE_QUEUES.get(q_type, [])
+    capacity = q_type * 2
+    
+    if player_ids:
+        player_list_str = "\n".join(f"• <@{p_id}>" for p_id in player_ids)
+    else:
+        player_list_str = "_No players currently waiting in this bracket pool._"
+        
+    embed = discord.Embed(
+        title=f"🏒 {q_type}v{q_type} Competitive Matchmaking Queue",
+        description="Select an action node trigger below to manage your registration slot inside the active waiting roster tree.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name=f"👥 Registered Competitors ({len(player_ids)}/{capacity})", value=player_list_str, inline=False)
+    embed.set_footer(text="Match series initialization automatically triggers once player allocation bounds are full.")
+    return embed
+
+
+# ==============================================================================
+# --- AUTOMATED SELF-REPORTING MATCH VOTING SYSTEM ---
+# ==============================================================================
+
 class MatchVoteView(discord.ui.View):
-    """Generates cross-squad confirmation interface blueprints so players self-report winners."""
     def __init__(self, match_id: str):
         super().__init__(timeout=None)
         self.match_id = match_id
@@ -514,7 +562,6 @@ class MatchVoteView(discord.ui.View):
         t2_votes = len(match["votes_t2"])
         required_threshold = match["vote_threshold"]
 
-        # Run conditional branches once a clean consensus signature matches requirements
         if t1_votes >= required_threshold:
             await self.resolve_match_victory(interaction, winner_team=1)
         elif t2_votes >= required_threshold:
@@ -526,7 +573,6 @@ class MatchVoteView(discord.ui.View):
         lose_ids = match["team2"] if winner_team == 1 else match["team1"]
         reward = DATA["config"].get("match_reward", 25)
 
-        # Process currency ledger deposits and increment win metrics records
         for p_id in win_ids:
             p_str = str(p_id)
             verify_user(p_str, f"Player {p_str}")
@@ -538,7 +584,6 @@ class MatchVoteView(discord.ui.View):
             verify_user(p_str, f"Player {p_str}")
             DATA["users"][p_str]["losses"] += 1
 
-        # Safely remove active game tracking roles configurations flags
         m_role_id = DATA["config"].get("match_role_id")
         m_role = interaction.guild.get_role(int(m_role_id)) if m_role_id else None
         if m_role:
@@ -547,79 +592,215 @@ class MatchVoteView(discord.ui.View):
                 if member: 
                     await member.remove_roles(m_role)
 
-        # Decommission the designated text channel environment
         channel = interaction.guild.get_channel(match["channel_id"])
-        
-        # Unlink working index targets before dissolving structural rooms
         del DATA["matches"][self.match_id]
         save_data()
 
         await interaction.channel.send(f"🎉 **Match Series Clear!** Consensus reached. Team {winner_team} wins the match! Competitors awarded `{reward}` coins.")
         if channel:
-            await channel.delete(reason=f"Automated System Resolution: Match #{self.match_id} completed via secure user vote.")
+            await channel.delete(reason=f"Automated System Resolution completed via user vote.")
 
     @discord.ui.button(label="Vote Team 1 (Home) Won", style=discord.ButtonStyle.success, custom_id="vote_team_1_btn")
     async def vote_t1(self, interaction: discord.Interaction, button: discord.ui.Button):
         m_str = self.match_id
         if m_str not in DATA["matches"]:
-            return await interaction.response.send_message("❌ This active match routing profile has already been dissolved.", ephemeral=True)
+            return await interaction.response.send_message("❌ This active match has already been resolved.", ephemeral=True)
 
         match = DATA["matches"][m_str]
         all_players = match["team1"] + match["team2"]
 
         if interaction.user.id not in all_players:
-            return await interaction.response.send_message("❌ Access Restricted: Only active competitors inside this series are authorized to vote.", ephemeral=True)
+            return await interaction.response.send_message("❌ Access Restricted: Only active competitors can vote.", ephemeral=True)
 
         u_id = interaction.user.id
         if u_id in match["votes_t1"] or u_id in match["votes_t2"]:
-            return await interaction.response.send_message("⚠️ State Tracking: You have already submitted a confirmation ballot for this match.", ephemeral=True)
+            return await interaction.response.send_message("⚠️ You have already submitted a vote for this match.", ephemeral=True)
 
         match["votes_t1"].append(u_id)
         save_data()
 
-        await interaction.response.send_message(f"🗳️ Your confirmation vote for **Team 1** has been recorded. Current standing: ({len(match['votes_t1'])} / {len(match['votes_t2'])})", ephemeral=False)
+        await interaction.response.send_message(f"🗳️ Vote recorded for **Team 1**. Standings: (🟢 {len(match['votes_t1'])} / 🔵 {len(match['votes_t2'])})", ephemeral=False)
         await self.check_series_resolution(interaction)
 
     @discord.ui.button(label="Vote Team 2 (Away) Won", style=discord.ButtonStyle.danger, custom_id="vote_team_2_btn")
     async def vote_t2(self, interaction: discord.Interaction, button: discord.ui.Button):
         m_str = self.match_id
         if m_str not in DATA["matches"]:
-            return await interaction.response.send_message("❌ This active match routing profile has already been dissolved.", ephemeral=True)
+            return await interaction.response.send_message("❌ This active match has already been resolved.", ephemeral=True)
 
         match = DATA["matches"][m_str]
         all_players = match["team1"] + match["team2"]
 
         if interaction.user.id not in all_players:
-            return await interaction.response.send_message("❌ Access Restricted: Only active competitors inside this series are authorized to vote.", ephemeral=True)
+            return await interaction.response.send_message("❌ Access Restricted: Only active competitors can vote.", ephemeral=True)
 
         u_id = interaction.user.id
         if u_id in match["votes_t1"] or u_id in match["votes_t2"]:
-            return await interaction.response.send_message("⚠️ State Tracking: You have already submitted a confirmation ballot for this match.", ephemeral=True)
+            return await interaction.response.send_message("⚠️ You have already submitted a vote for this match.", ephemeral=True)
 
         match["votes_t2"].append(u_id)
         save_data()
 
-        await interaction.response.send_message(f"🗳️ Your confirmation vote for **Team 2** has been recorded. Current standing: ({len(match['votes_t1'])} / {len(match['votes_t2'])})", ephemeral=False)
+        await interaction.response.send_message(f"🗳️ Vote recorded for **Team 2**. Standings: (🟢 {len(match['votes_t1'])} / 🔵 {len(match['votes_t2'])})", ephemeral=False)
         await self.check_series_resolution(interaction)
 
 
 # ==============================================================================
-# --- MAIN INITIALIZER RUNTIME DISPATCH SYSTEM ---
+# --- COMPETITIVE MATCHMAKING QUEUE ENGINE ---
 # ==============================================================================
 
-@bot.event
-async def on_ready():
-    load_data()
-    print(f"🏒 Master Card Collector & Match Queue Core Activated: {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"🔄 Successfully synchronized {len(synced)} operational slash layouts.")
-    except Exception as e:
-        print(f"Sync Fault Encountered: {e}")
+def make_queue_embed(q_type: int) -> discord.Embed:
+    player_ids = ACTIVE_QUEUES.get(q_type, [])
+    capacity = q_type * 2
+    
+    if player_ids:
+        player_list_str = "\n".join(f"• <@{p_id}>" for p_id in player_ids)
+    else:
+        player_list_str = "_No players currently waiting in this bracket pool._"
+        
+    embed = discord.Embed(
+        title=f"🏒 {q_type}v{q_type} Competitive Matchmaking Queue",
+        description="Select an action node trigger below to manage your registration slot inside the active waiting roster tree.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name=f"👥 Registered Competitors ({len(player_ids)}/{capacity})", value=player_list_str, inline=False)
+    embed.set_footer(text="Match series initialization automatically triggers once player allocation bounds are full.")
+    return embed
 
-# Start background Flask server infrastructure to catch cron-job.org keep-alive pings
+
+class QueueView(discord.ui.View):
+    def __init__(self, q_type: int):
+        super().__init__(timeout=None)
+        self.q_type = q_type
+
+    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.primary, custom_id="join_queue_node_btn")
+    async def join_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        u_id = interaction.user.id
+        queue = ACTIVE_QUEUES[self.q_type]
+        capacity = self.q_type * 2
+        
+        if u_id in queue:
+            return await interaction.response.send_message("⚠️ Tracking Error: You are already registered inside this specific match waiting pool loop.", ephemeral=True)
+            
+        queue.append(u_id)
+        
+        q_role_id = DATA["config"].get("queue_role_id")
+        if q_role_id:
+            role = interaction.guild.get_role(int(q_role_id))
+            if role: 
+                await interaction.user.add_roles(role)
+                
+        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
+        
+        if len(queue) >= capacity:
+            await trigger_match_initialization(interaction, self.q_type)
+
+    @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.danger, custom_id="leave_queue_node_btn")
+    async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        u_id = interaction.user.id
+        queue = ACTIVE_QUEUES[self.q_type]
+        
+        if u_id not in queue:
+            return await interaction.response.send_message("❌ Error: You are not currently registered inside this active queue waiting tree.", ephemeral=True)
+            
+        queue.remove(u_id)
+        
+        q_role_id = DATA["config"].get("queue_role_id")
+        if q_role_id:
+            role = interaction.guild.get_role(int(q_role_id))
+            if role: 
+                await interaction.user.remove_roles(role)
+                
+        await interaction.response.edit_message(embed=make_queue_embed(self.q_type), view=self)
+
+
+async def trigger_match_initialization(interaction: discord.Interaction, q_type: int):
+    guild = interaction.guild
+    origin_channel = interaction.channel
+    
+    queue = ACTIVE_QUEUES[q_type].copy()
+    ACTIVE_QUEUES[q_type].clear()
+    
+    fresh_view = QueueView(q_type)
+    fresh_embed = make_queue_embed(q_type)
+    await origin_channel.send(embed=fresh_embed, view=fresh_view)
+    
+    random.shuffle(queue)
+    team_size = q_type
+    team1_ids = queue[:team_size]
+    team2_ids = queue[team_size:]
+    
+    m_id = DATA["next_match_id"]
+    DATA["next_match_id"] += 1
+    
+    q_role_id = DATA["config"].get("queue_role_id")
+    m_role_id = DATA["config"].get("match_role_id")
+    
+    q_role = guild.get_role(int(q_role_id)) if q_role_id else None
+    m_role = guild.get_role(int(m_role_id)) if m_role_id else None
+    
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.me: discord.PermissionOverwrite(read_messages=True)
+    }
+    
+    for p_id in queue:
+        member = guild.get_member(p_id)
+        if member:
+            overwrites[member] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            if q_role: 
+                await member.remove_roles(q_role)
+            if m_role: 
+                await member.add_roles(m_role)
+                
+    category = discord.utils.get(guild.categories, name="Active Matches")
+    if not category:
+        category = await guild.create_category("Active Matches")
+        
+    channel = await guild.create_text_channel(name=f"match-{m_id}", category=category, overwrites=overwrites)
+    
+    t1_names = [guild.get_member(p).display_name for p in team1_ids if guild.get_member(p)]
+    t2_names = [guild.get_member(p).display_name for p in team2_ids if guild.get_member(p)]
+    
+    DATA["matches"][str(m_id)] = {
+        "channel_id": channel.id,
+        "type": q_type,
+        "team1": team1_ids,
+        "team2": team2_ids,
+        "votes_t1": [],
+        "votes_t2": [],
+        "vote_threshold": q_type + 1
+    }
+    save_data()
+    
+    embed = discord.Embed(
+        title=f"⚡ Match Series #{m_id} Initialized!", 
+        color=discord.Color.red(), 
+        description="Format Setup Type: **Best of 3 Matches Series Blueprint**\n\nUse the buttons below to lock in the self-reported winner!"
+    )
+    embed.add_field(name="🟢 Team 1 (Home)", value="\n".join(t1_names) or "Empty Thread Roster", inline=True)
+    embed.add_field(name="🔵 Team 2 (Away)", value="\n".join(t2_names) or "Empty Thread Roster", inline=True)
+    embed.set_footer(text="Competitors must cross-verify results to execute channel closures.")
+    
+    vote_view = MatchVoteView(str(m_id))
+    await channel.send(content=" ".join(f"<@{p_id}>" for p_id in queue), embed=embed, view=vote_view)
+
+
+@bot.hybrid_command(name="setupqueue", description="Staff Command: Spawn a dynamic interactive match-making interface link widget")
+@is_staff()
+@app_commands.choices(format_size=[
+    app_commands.Choice(name="1v1 Bracket Match", value=1), 
+    app_commands.Choice(name="2v2 Bracket Match", value=2), 
+    app_commands.Choice(name="3v3 Bracket Match", value=3)
+])
+async def setupqueue(ctx, format_size: int):
+    view = QueueView(format_size)
+    embed = make_queue_embed(format_size)
+    await ctx.send(embed=embed, view=view)
+
+# --- Start Services ---
 keep_alive()
-
-# Establish primary operational login interface token connectivity
 bot.run(TOKEN)
+
+
 
