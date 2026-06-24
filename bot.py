@@ -873,6 +873,14 @@ async def on_message(message: discord.Message):
         winning_user_ids = []
         losing_user_ids = []
 
+        # 🚨 FIX: Force the bot to download and cache the live server member list!
+        # Without this line, message.guild.members returns 0 accounts, breaking name matching.
+        if message.guild:
+            try:
+                await message.guild.query_members(limit=100, cache=True)
+            except Exception as e:
+                print(f"Member chunking fault: {e}")
+
         # 🎯 ADVANCED CLEAN NAME PARSER
         # Splitting the text by line to inspect exactly who got a + or a -
         for line in text_to_scan.split("\n"):
@@ -896,7 +904,7 @@ async def on_message(message: discord.Message):
             if not clean_line:
                 continue
 
-            # Match the cleaned plain text string directly to a server member profile
+            # Match the cleaned plain text string directly to the freshly downloaded server member cache
             member = discord.utils.get(message.guild.members, display_name=clean_line) or \
                      discord.utils.get(message.guild.members, name=clean_line)
             
@@ -935,6 +943,7 @@ async def on_message(message: discord.Message):
                 )
 
     await bot.process_commands(message)
+
 
 # --- Start Services ---
 keep_alive()
