@@ -490,13 +490,6 @@ class TradeView(discord.ui.View):
 # --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
 # ==============================================================================
 
-@bot.hybrid_command(name="setstaffrole", description="Server Owner Command: Define the authority role required to access staff functions")
-@commands.has_permissions(administrator=True)
-async def setstaffrole(ctx, role: discord.Role):
-    DATA["config"]["staff_role_name"] = role.name
-    save_data()
-    await ctx.send(f"🛡️ **Staff Access Role Calibrated!** Users with the role **{role.name}** are now authorized to execute administrator ledger actions.")
-
 @bot.hybrid_command(name="editmatchreward", description="Staff Command: Calibrate the global currency payout size awarded to winning teams")
 @is_staff()
 async def editmatchreward(ctx, new_reward: int):
