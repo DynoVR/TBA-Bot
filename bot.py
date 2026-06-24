@@ -79,37 +79,58 @@ DATA = {
 }
 
 def save_data():
-    """Saves data locally and automatically syncs it back to your GitHub Repo permanently."""
+    """Saves data locally and forces an authorized backup commit to GitHub Cloud securely."""
+    # 1. Always write to the local virtual directory first
     try:
         with open(DATABASE_FILE, "w") as f:
             json.dump(DATA, f, indent=4)
+        print("💾 System state written to local cache successfully.")
     except Exception as e:
-        print(f"Local Save Error: {e}")
+        print(f"❌ Local Write Fault: {e}")
 
+    # 2. Skip the cloud backup if your Render Environment variable is missing
     if not GH_TOKEN:
+        print("⚠️ Warning: 'GH_TOKEN' environment key missing. Cloud sync skipped.")
         return
 
+    # 3. Execute the authorized GitHub cloud transfer pipeline
     try:
         url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
-        headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
         
+        # FIXED: Reinforced authorized request headers to authenticate with private repositories
+        headers = {
+            "Authorization": f"Bearer {GH_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Discord-Bot-Data-Sync"
+        }
+        
+        # Look up if the file already exists to grab its mandatory version tracking 'sha' code
         get_req = requests.get(url, headers=headers)
-        sha = get_req.json().get("sha") if get_req.status_code == 200 else None
+        sha = None
+        if get_req.status_code == 200:
+            sha = get_req.json().get("sha")
         
+        # Encode your master dictionary into clean base64 data streams
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
         
-        payload = {"message": "🔄 Automated Live Database State Backup Sync", "content": encoded_content}
-        if sha: 
+        payload = {
+            "message": "🔄 Automated Live Database State Backup Sync",
+            "content": encoded_content
+        }
+        if sha:
             payload["sha"] = sha
             
+        # Pushing the file updates up to your live repo
         put_req = requests.put(url, headers=headers, json=payload)
+        
         if put_req.status_code in (200, 201):
-            print("💾 Database securely backed up to GitHub Repository successfully!")
+            print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
         else:
-            print(f"GitHub Sync Failed: {put_req.text}")
+            print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
+            
     except Exception as e:
-        print(f"GitHub Cloud Sync Fault: {e}")
+        print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
 
 def load_data():
     global DATA
@@ -870,10 +891,16 @@ async def on_message(message: discord.Message):
                 for field in embed.fields:
                     text_to_scan += f"{field.name} {field.value}\n"
 
+        # 🚨 FIX: Strict Gatekeeper Verification
+        # Check if the message actually contains the queue winner confirmation keywords.
+        # If it doesn't say "winner", stop processing immediately so it ignores general queue traffic.
+        if "winner" not in text_to_scan.lower():
+            return
+
         winning_user_ids = []
         losing_user_ids = []
 
-        # Force the bot to download and cache the live server member list!
+        # Force the bot to download and cache the live server member list
         if message.guild:
             try:
                 await message.guild.query_members(limit=250, cache=True)
@@ -900,8 +927,7 @@ async def on_message(message: discord.Message):
             if not clean_line or len(clean_line) < 2:
                 continue
 
-            # 🎯 FIXED: PARTIAL USER MATCHING ALGORITHM
-            # If an exact match fails, find any user whose name or display nickname contains the clean string text
+            # Partial matching algorithm to connect truncated nicknames to server members
             member = discord.utils.get(message.guild.members, display_name=clean_line) or \
                      discord.utils.get(message.guild.members, name=clean_line)
                      
@@ -923,7 +949,7 @@ async def on_message(message: discord.Message):
 
         # 3. Award the matching users inside your league database ledger
         if winning_user_ids or losing_user_ids:
-            reward = DATA["config"].get("match_reward", 50)
+            reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
 
             for p_id in winning_user_ids:
@@ -949,9 +975,7 @@ async def on_message(message: discord.Message):
                 )
 
     await bot.process_commands(message)
-
-
-
+    
 # --- Start Services ---
 keep_alive()
 bot.run(TOKEN)
