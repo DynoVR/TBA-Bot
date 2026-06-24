@@ -484,26 +484,7 @@ class TradeView(discord.ui.View):
         await interaction.response.edit_message(content="🛑 Trade Cancelled. Propose transaction rejected.", view=None)
 
 
-@bot.hybrid_command(name="trade", description="Public Command: Initiate an asset swap transaction with another user")
-async def trade(ctx, target_player: discord.Member, your_card_id: str, their_card_id: str):
-    if target_player == ctx.author: 
-        return await ctx.send("❌ Self cycle blocked.")
-        
-    s_id, r_id = str(ctx.author.id), str(target_player.id)
-    verify_user(s_id, ctx.author.display_name)
-    verify_user(r_id, target_player.display_name)
-    
-    if your_card_id not in DATA["global_cards"] or their_card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: One or both card identity ID strings do not exist.")
-        
-    if DATA["users"][s_id]["inventory"].get(your_card_id, 0) < 1: 
-        return await ctx.send("❌ Error: You do not own that item asset identifier.")
-        
-    if DATA["users"][r_id]["inventory"].get(their_card_id, 0) < 1: 
-        return await ctx.send("❌ Error: Target user does not own requested item asset.")
-        
-    view = TradeView(ctx.author, target_player, your_card_id, their_card_id)
-    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} wants to swap their {DATA['global_cards'][your_card_id]['name']} ({your_card_id}) for your {DATA['global_cards'][their_card_id]['name']} ({their_card_id}). Do you accept?", view=view)
+
 
 # ==============================================================================
 # --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
@@ -515,7 +496,6 @@ async def setstaffrole(ctx, role: discord.Role):
     DATA["config"]["staff_role_name"] = role.name
     save_data()
     await ctx.send(f"🛡️ **Staff Access Role Calibrated!** Users with the role **{role.name}** are now authorized to execute administrator ledger actions.")
-
 
 @bot.hybrid_command(name="editmatchreward", description="Staff Command: Calibrate the global currency payout size awarded to winning teams")
 @is_staff()
