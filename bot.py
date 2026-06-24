@@ -195,6 +195,16 @@ async def on_ready():
     load_data()
     keep_alive()
     print(f"🏒 Bot Online: Connected as {bot.user}")
+    
+    # 🚨 FIX: Cache all server members once on startup to prevent command timeouts
+    print("👥 Fetching and caching server member directory matrices...")
+    for guild in bot.guilds:
+        try:
+            await guild.chunk(cache=True)
+            print(f"✅ Cached members for guild: {guild.name}")
+        except Exception as e:
+            print(f"⚠️ Guild chunking skipped for {guild.name}: {e}")
+            
     try:
         await bot.tree.sync()
         print("🔄 Slash layout modules linked seamlessly.")
@@ -865,16 +875,10 @@ async def setupqueue(ctx, format_size: int):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # 1. Ignore messages sent by your own bot to prevent feedback loops
     if message.author == bot.user:
         return
 
-    # 2. Match if sender name contains NeatQueue, is a Webhook, or is a Bot
-    is_neatque = "neat" in message.author.name.lower()
-    is_webhook = message.webhook_id is not None
-    is_bot = message.author.bot
-
-    if is_neatque or is_webhook or is_bot or message.author.id == 857633321064595466:
+    if message.author.id == 857633321064595466 or "neat" in message.author.name.lower():
         text_to_scan = ""
         
         if message.content:
@@ -889,19 +893,34 @@ async def on_message(message: discord.Message):
                 for field in embed.fields:
                     text_to_scan += f" {field.name} {field.value} \n"
 
-        # Gatekeeper Check: Exit early if this isn't a final match results scorecard
-        if "winner" not in text_to_scan.lower():
+        clean_text_payload = text_to_scan.lower()
+
+        if "winner" not in clean_text_payload:
             return
 
-        # 🎯 FIX: DISCORD MENTION ID REGEX ENGINE
-        # This matches real clickable mentions (<@12345678>) up to their positive/negative symbols
-        # Pattern A: Finds clickable mentions followed anywhere by a '+' indicator
-        winning_user_ids = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
-        
-        # Pattern B: Finds clickable mentions followed anywhere by a '-' indicator
-        losing_user_ids = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
+        winning_user_ids = []
+        losing_user_ids = []
 
-        # 3. Apply rewards directly using the extracted account numbers
+        # 🎯 FAST MEMORY PARSER NODES (No more slow network calls)
+        winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
+        losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
+
+        if not winners_found and not losers_found:
+            for line in text_to_scan.split("\n"):
+                if "+" in line:
+                    plain_win = re.findall(r"@([^+\-\n\s\(]+)", line)
+                    for name in plain_win:
+                        member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
+                        if member: winning_user_ids.append(str(member.id))
+                elif "-" in line:
+                    plain_loss = re.findall(r"@([^+\-\n\s\(]+)", line)
+                    for name in plain_loss:
+                        member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
+                        if member: losing_user_ids.append(str(member.id))
+        else:
+            winning_user_ids = winners_found
+            losing_user_ids = losers_found
+
         if winning_user_ids or losing_user_ids:
             reward = DATA["config"].get("match_reward", 25)
             awarded_mentions = []
@@ -918,24 +937,18 @@ async def on_message(message: discord.Message):
                 verify_user(p_str, f"User {p_str}")
                 DATA["users"][p_str]["losses"] += 1
 
-            # Commit adjustments immediately to the permanent GitHub cloud save
             save_data()
 
-            # Dispatch transaction receipts into the channel live
             if awarded_mentions:
                 await message.channel.send(
-                    f"🪙 **NeatQue Automated Link Synced!** Match column data processed.\n"
+                    f"🪙 **NeatQue Automated Link Synced!** Match result parsed successfully.\n"
                     f"The following winners have been credited with **{reward} coins**: "
                     f"{', '.join(awarded_mentions)}"
                 )
 
-    # 4. Critical baseline logic required to continue keeping prefix text commands responsive
     await bot.process_commands(message)
 
 # --- Start Services ---
 keep_alive()
 bot.run(TOKEN)
-
-
-
 
