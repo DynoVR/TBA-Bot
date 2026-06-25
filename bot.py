@@ -164,9 +164,11 @@ def save_data():
         url = "https://github.com"
         
         headers = {
-            "Authorization": f"Bearer {GH_TOKEN}",
+            "Authorization": f"token {GH_TOKEN}",
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "Discord-Bot-Data-Sync"
+        }
+
         }
         
         get_req = requests.get(url, headers=headers)
