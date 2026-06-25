@@ -1012,14 +1012,10 @@ async def on_message_edit(before, after):
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
 # ==============================================================================
 
+# --- Start Services ---
 if __name__ == "__main__":
-    # 1. Start the Flask keep-alive server in a background thread to prevent thread lock
     keep_alive()
-    
-    # 2. Force the cloud sync download BEFORE logging into Discord
     load_data()
-    
-    # 3. Securely authenticate and launch your primary Discord client thread instance
     if TOKEN:
         print("🤖 Connecting client to Discord Gateway panels...")
         bot.run(TOKEN)
