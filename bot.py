@@ -241,8 +241,8 @@ async def automatic_neatque_scanner():
     for guild in bot.guilds:
         try:
             await guild.chunk(cache=True)
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ Guild chunk warning: {e}")
             
         for channel in guild.text_channels:
             channel_name = channel.name.lower()
@@ -259,6 +259,9 @@ async def automatic_neatque_scanner():
                 try:
                     # Scan the last 15 messages posted in that channel arena
                     async for message in channel.history(limit=15):
+                        if "processed_neatque_matches" not in DATA:
+                            DATA["processed_neatque_matches"] = []
+                            
                         if str(message.id) in DATA["processed_neatque_matches"]:
                             continue
                             
@@ -348,14 +351,16 @@ async def automatic_neatque_scanner():
                                 save_data()
                                 
                                 if awarded_mentions:
-                                    await channel.send(
-                                        f"🪙 **NeatQueue Automated Link Synced!** Final match result parsed successfully.\n"
-                                        f"The following winners have been credited with **{reward} coins**: "
-                                        f"{', '.join(awarded_mentions)}"
-                                    )
+                                    try:
+                                        await channel.send(
+                                            f"🪙 **NeatQueue Automated Link Synced!** Final match result parsed successfully.\n"
+                                            f"The following winners have been credited with **{reward} coins**: "
+                                            f"{', '.join(awarded_mentions)}"
+                                        )
+                                    except discord.errors.Forbidden:
+                                        print(f"⚠️ Missing Permissions: Couldn't post success confirmation in #{channel.name}, but coin balances were successfully backed up to cloud systems.")
                 except Exception as e:
-                    pass
-
+                    print(f"❌ Background history parser loop warning: {e}")
 
 # ==============================================================================
 # --- BOT INITIALIZER AND EVENT HOOKS ---
