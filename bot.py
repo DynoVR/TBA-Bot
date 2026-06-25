@@ -469,29 +469,25 @@ async def automatic_neatque_scanner():
 
 @bot.event
 async def on_ready():
-    """Triggered automatically when the bot successfully authenticates with Discord Gateway."""
-    print(f"🏒 Bot Online: Connected as {bot.user.name} ({bot.user.id})")
-    
-    # Verify our data configuration parameters are fully loaded
-    if not DATA.get("users") and not DATA.get("global_cards"):
-        print("⚠️ Data Alert: Master database structure is completely empty.")
-    else:
-        print(f"✅ Data Active: Verified {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
+    print(f"🏒 Bot Online: Connected as {bot.user.name}")
 
-    # Start your background loop safely
+    # 1. Define your specific Guild
+    MY_GUILD_ID = discord.Object(id=123456789012345678) # <-- PUT YOUR REAL SERVER ID HERE
+    
+    # 2. Clear old global commands to prevent conflicts
+    bot.tree.clear_commands(guild=None) 
+    
+    # 3. Copy commands to your guild and sync
+    bot.tree.copy_global_to(guild=MY_GUILD_ID)
+    try:
+        synced = await bot.tree.sync(guild=MY_GUILD_ID)
+        print(f"✅ Synced {len(synced)} commands to Guild {MY_GUILD_ID.id}")
+    except Exception as e:
+        print(f"❌ Sync Error: {e}")
+
+    # Start your loop
     if not automatic_neatque_scanner.is_running():
         automatic_neatque_scanner.start()
-        print("🚀 Automated NeatQueue background scanner engine started safely.")
-        
-    # Synchronize slash commands specifically for your server
-    try:
-        # Replace 123456789012345678 with your ACTUAL Server ID
-        GUILD = discord.Object(id=123456789012345678) 
-        bot.tree.copy_global_to(guild=GUILD)
-        synced = await bot.tree.sync(guild=GUILD)
-        print(f"🌲 Successfully synchronized {len(synced)} application slash commands to the Guild.")
-    except Exception as e:
-        print(f"❌ Application Command Tree Sync Fault: {e}")
 
 # ==============================================================================
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
