@@ -465,25 +465,29 @@ async def automatic_neatque_scanner():
 
 @bot.event
 async def on_ready():
-    print(f"🏒 Bot Online: Connected as {bot.user.name}")
+    print(f"🏒 Bot Online: Connected as {bot.user.name} ({bot.user.id})")
     
-    # Verify our data configuration parameters are fully loaded
-    if not DATA.get("users") and not DATA.get("global_cards"):
-        print("⚠️ Data Alert: Master database structure is completely empty.")
-    else:
-        print(f"✅ Data Active: Verified {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
-
     # Start your background loop safely
     if not automatic_neatque_scanner.is_running():
         automatic_neatque_scanner.start()
         print("🚀 Automated NeatQueue background scanner engine started safely.")
         
-    # GLOBAL SYNC: Registers commands globally so they work in your server
+    # GLOBAL SYNC: Registers all slash commands cleanly to Discord
     try:
         synced = await bot.tree.sync()
         print(f"🌲 Successfully synchronized {len(synced)} application slash commands globally.")
     except Exception as e:
         print(f"❌ Application Command Tree Sync Fault: {e}")
+
+@bot.command(name="forcesync")
+async def forcesync(ctx):
+    """Bypasses all caches and forces absolute registration of every hybrid command."""
+    await ctx.defer()
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"✅ Master Force Sync Complete! Registered **{len(synced)}** slash layouts globally.")
+    except Exception as e:
+        await ctx.send(f"❌ Force Sync Crashed: {e}")
 
 # ==============================================================================
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
