@@ -154,13 +154,35 @@ def save_data():
         print(f"❌ External Cloud Save Pipeline Crash: {e}")
 
 def verify_user(user_id_str, username="Unknown"):
+    global DATA
+    
+    # SAFETY LOCK: If data hasn't finished loading yet, force an immediate pull
+    if not DATA or "users" not in DATA:
+        print("⚠️ verify_user caught a race condition! Forcing database reload to protect player vaults...")
+        if DB_URL and DB_KEY:
+            try:
+                headers = {"X-Master-Key": DB_KEY, "X-Bin-Meta": "false"}
+                res = requests.get(DB_URL, headers=headers)
+                if res.status_code == 200:
+                    DATA = res.json()
+            except Exception as e:
+                print(f"❌ Force pull inside verify_user failed: {e}")
+
+    # Double safeguard: ensuring core nested nodes exist in memory
     if "users" not in DATA:
         DATA["users"] = {}
+        
+    # Standard account initialization bounds mapping
     if user_id_str not in DATA["users"]:
         DATA["users"][user_id_str] = {
-            "name": username, "coins": 150, "inventory": {},
-            "last_weekly": None, "wins": 0, "losses": 0
+            "name": username, 
+            "coins": 150, 
+            "inventory": {},
+            "last_weekly": None, 
+            "wins": 0, 
+            "losses": 0
         }
+
 # --- Permission Check Decorators ---
 def is_staff():
     async def predicate(ctx):
