@@ -483,10 +483,13 @@ async def on_ready():
         automatic_neatque_scanner.start()
         print("🚀 Automated NeatQueue background scanner engine started safely.")
         
-    # Synchronize slash commands instantly
+    # Synchronize slash commands specifically for your server
     try:
-        synced = await bot.tree.sync()
-        print(f"🌲 Successfully synchronized {len(synced)} application slash commands.")
+        # Replace 123456789012345678 with your ACTUAL Server ID
+        GUILD = discord.Object(id=123456789012345678) 
+        bot.tree.copy_global_to(guild=GUILD)
+        synced = await bot.tree.sync(guild=GUILD)
+        print(f"🌲 Successfully synchronized {len(synced)} application slash commands to the Guild.")
     except Exception as e:
         print(f"❌ Application Command Tree Sync Fault: {e}")
 
