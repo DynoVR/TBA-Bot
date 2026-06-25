@@ -97,10 +97,6 @@ DATA = {
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
 
-# ==============================================================================
-# --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
-# ==============================================================================
-
 def load_data():
     global DATA
     print("🔄 Initiating master league database synchronization...")
@@ -475,7 +471,7 @@ async def on_ready():
     await bot.tree.sync(guild=None) # Clears global
     
     # 2. Define your server
-    MY_GUILD_ID = discord.Object(id=YOUR_SERVER_ID_HERE)
+    MY_GUILD_ID = discord.Object(id=1225255717057986590)
     
     # 3. Register fresh
     bot.tree.copy_global_to(guild=MY_GUILD_ID)
