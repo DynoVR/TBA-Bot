@@ -32,12 +32,6 @@ def run_web_server():
     except Exception as e:
         print(f"⚠️ Flask Web Server Port Bind Warning: {e}")
 
-def keep_alive():
-    t = threading.Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
-
-
 # --- System Environment Configurations ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
 DATABASE_FILE = "card_league_database.json"
