@@ -715,8 +715,6 @@ async def buypack(ctx, pack_size: int):
     embed = discord.Embed(title="🎉 Box Opening Sequence Complete!", description="\n".join(lines), color=discord.Color.gold())
     await ctx.send(embed=embed)
 
-
-@bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
 # ==============================================================================
 # --- LEDGER VAULTS MODULES ---
 # ==============================================================================
@@ -744,8 +742,7 @@ async def claimweekly(ctx):
         lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
         
     DATA["users"][u_id]["last_weekly"] = now.isoformat()
-    save_data()
-    await ctx.send(embed=discord.Embed(title="📅 Weekly Rewards Allocated!", description="\n".join(lines), color=discord.Color.green()))
+
 
 
 @bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix")
