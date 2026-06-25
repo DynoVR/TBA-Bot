@@ -469,25 +469,19 @@ async def automatic_neatque_scanner():
 
 @bot.event
 async def on_ready():
-    print(f"🏒 Bot Online: Connected as {bot.user.name}")
-
-    # 1. Define your specific Guild
-    MY_GUILD_ID = discord.Object(id=123456789012345678) # <-- PUT YOUR REAL SERVER ID HERE
+    print(f"🏒 Bot Online: {bot.user.name}")
     
-    # 2. Clear old global commands to prevent conflicts
-    bot.tree.clear_commands(guild=None) 
+    # 1. Clear everything from Discord's cache first
+    await bot.tree.sync(guild=None) # Clears global
     
-    # 3. Copy commands to your guild and sync
+    # 2. Define your server
+    MY_GUILD_ID = discord.Object(id=YOUR_SERVER_ID_HERE)
+    
+    # 3. Register fresh
     bot.tree.copy_global_to(guild=MY_GUILD_ID)
-    try:
-        synced = await bot.tree.sync(guild=MY_GUILD_ID)
-        print(f"✅ Synced {len(synced)} commands to Guild {MY_GUILD_ID.id}")
-    except Exception as e:
-        print(f"❌ Sync Error: {e}")
-
-    # Start your loop
-    if not automatic_neatque_scanner.is_running():
-        automatic_neatque_scanner.start()
+    synced = await bot.tree.sync(guild=MY_GUILD_ID)
+    
+    print(f"✅ Synced {len(synced)} commands to your server.")
 
 # ==============================================================================
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
