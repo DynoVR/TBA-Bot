@@ -145,7 +145,6 @@ def load_data():
             
     print("🚨 System Warning: No valid remote or local database detected. Preserving baseline template.")
 
-
 def save_data():
     """Saves data locally and forces an authorized backup commit to GitHub Cloud securely."""
     try:
@@ -167,11 +166,19 @@ def save_data():
             "User-Agent": "Discord-Bot-Data-Sync"
         }
         
+        # 1. Fetch the tracking SHA from GitHub
         get_req = requests.get(url, headers=headers)
+        print(f"📡 Save Sync: SHA Lookup Response Status Code: {get_req.status_code}")
+        
         sha = None
         if get_req.status_code == 200:
             sha = get_req.json().get("sha")
-            
+        elif get_req.status_code == 404:
+            print("⚠️ Save Sync Alert: database file not found on GitHub yet. Creating it fresh...")
+        else:
+            print(f"❌ Save Sync Warning: SHA lookup failed with code {get_req.status_code}. Details: {get_req.text}")
+        
+        # 2. Encode and package the live data dictionary structures
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
         
@@ -182,7 +189,9 @@ def save_data():
         if sha:
             payload["sha"] = sha
             
+        # 3. Force the upload commit up to your main branch
         put_req = requests.put(url, headers=headers, json=payload)
+        print(f"📡 Save Sync: Put Commit Response Status Code: {put_req.status_code}")
         
         if put_req.status_code in (200, 201):
             print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
@@ -190,7 +199,6 @@ def save_data():
             print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
     except Exception as e:
         print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
-
 
 def verify_user(user_id_str, username="Unknown"):
     if "users" not in DATA:
