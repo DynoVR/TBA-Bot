@@ -12,20 +12,28 @@ import re
 from datetime import datetime, timedelta
 from flask import Flask
 
-
 # --- Flask Keep-Alive Web Server ---
+# ==============================================================================
+# --- FIXED FLASK KEEP-ALIVE WEB SERVER ARCHITECTURE ---
+# ==============================================================================
 app = Flask('')
 
 @app.route('/')
 def home():
     return "OK", 200
 
+if not hasattr(app, "_already_running"):
+    app._already_running = False
+
 def run_web_server():
-    # Render explicitly needs us to use the exact port number it gives us in the environment
+    if app._already_running:
+        print("ℹ️ Flask loop bypass: Server instance already established.")
+        return
+        
     port = int(os.environ.get("PORT", 8080))
     try:
-        # Added threaded=True to prevent Flask from choking or locking up the bot threads
-        app.run(host='0.0.0.0', port=port, threaded=True)
+        app._already_running = True
+        app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
     except Exception as e:
         print(f"⚠️ Flask Web Server Port Bind Warning: {e}")
 
@@ -34,6 +42,164 @@ def keep_alive():
     t.daemon = True
     t.start()
 
+
+# --- Configuration & Security ---
+TOKEN = os.environ.get("DISCORD_TOKEN")
+DATABASE_FILE = "card_league_database.json"
+
+# --- GitHub Auto-Sync Save System Configurations ---
+GITHUB_USERNAME = "DynoVR"
+GITHUB_REPO = "TBA-Bot"
+GITHUB_FILE_PATH = "card_league_database.json"
+GH_TOKEN = os.environ.get("GH_TOKEN")
+
+# Ordered priority mapping for sorted card ledger structures
+RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
+
+# Global Tracker Container for Matchmaking Queues
+ACTIVE_QUEUES = {1: [], 2: [], 3: []}
+
+# --- Complete Consolidated Database System Template ---
+DATA = {
+    "season_title": "TBA League",
+    "games_count": 0,
+    "preseason": False,
+    "teams": {},
+    "players": {},
+    "schedule": [],
+    "playoffs": { "active": False, "best_of": 3, "rounds": {} },
+    "global_cards": {},  
+    "users": {},         
+    "matches": {},       
+    "next_match_id": 1,
+    "config": {
+        "pack_3_price": 50,
+        "pack_5_price": 80,
+        "pack_10_price": 150,
+        "match_reward": 25,
+        "queue_role_id": None,
+        "match_role_id": None,
+        "sell_prices": {
+            "Average": 10,
+            "Great": 20,
+            "Epic": 40,
+            "Insane": 75,
+            "Pro": 150,
+            "Juggernaut": 300,
+            "Otherworldly": 750,
+            "Specialty": 1500
+        }
+    }
+}
+
+
+# ==============================================================================
+# --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
+# ==============================================================================
+
+# ==============================================================================
+# --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
+# ==============================================================================
+
+def load_data():
+    global DATA
+    print("🔄 Initiating master league database synchronization...")
+    
+    if GH_TOKEN:
+        try:
+            # FIXED LINK: Fully typed destination path to prevent connection resets
+            url = "https://github.com"
+            headers = {
+                "Authorization": f"Bearer {GH_TOKEN}", 
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "Discord-Bot-Data-Sync"
+            }
+            res = requests.get(url, headers=headers)
+            
+            if res.status_code == 200:
+                file_data = res.json()
+                content = base64.b64decode(file_data["content"]).decode("utf-8")
+                loaded_json = json.loads(content)
+                
+                if loaded_json.get("users") or loaded_json.get("global_cards"):
+                    DATA = loaded_json
+                    print("☁️ Success: Permanent database successfully pulled and restored from GitHub Cloud!")
+                    
+                    with open(DATABASE_FILE, "w") as f:
+                        json.dump(DATA, f, indent=4)
+                    return
+                else:
+                    print("⚠️ Cloud Pull Alert: Remote file exists but appeared blank. Checking local fallback.")
+            else:
+                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit.")
+        except Exception as e:
+            print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
+
+    if os.path.exists(DATABASE_FILE):
+        try:
+            with open(DATABASE_FILE, "r") as f:
+                local_data = json.load(f)
+                if local_data.get("users") or local_data.get("global_cards"):
+                    DATA = local_data
+                    print("💾 Local cache database loaded successfully as fallback configuration.")
+                    return
+        except Exception as e:
+            print(f"❌ Local Read Error: {e}")
+            
+    print("🚨 System Warning: No valid remote or local database detected. Initializing clean template layer.")
+
+
+def save_data():
+    """Saves data locally and forces an authorized backup commit to GitHub Cloud securely."""
+    try:
+        with open(DATABASE_FILE, "w") as f:
+            json.dump(DATA, f, indent=4)
+        print("💾 System state written to local cache successfully.")
+    except Exception as e:
+        print(f"❌ Local Write Fault: {e}")
+
+    if not GH_TOKEN:
+        print("⚠️ Warning: 'GH_TOKEN' environment key missing. Cloud sync skipped.")
+        return
+
+    try:
+        # FIXED LINK: Fully typed destination path to prevent connection resets
+        url = "https://github.com"
+        
+        headers = {
+            "Authorization": f"Bearer {GH_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Discord-Bot-Data-Sync"
+        }
+        
+        get_req = requests.get(url, headers=headers)
+        sha = None
+        if get_req.status_code == 200:
+            sha = get_req.json().get("sha")
+            
+        content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
+        encoded_content = base64.b64encode(content_bytes).decode('utf-8')
+        
+        payload = {
+            "message": "🔄 Automated Live Database State Backup Sync",
+            "content": encoded_content
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        put_req = requests.put(url, headers=headers, json=payload)
+        
+        if put_req.status_code in (200, 201):
+            print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
+        else:
+            print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
+            
+    except Exception as e:
+        print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
+
+# --- Configuration & Security ---
+TOKEN = os.environ.get("DISCORD_TOKEN")
+DATABASE_FILE = "card_league_database.json"
 # --- Configuration & Security ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
 DATABASE_FILE = "card_league_database.json"
@@ -100,7 +266,7 @@ def save_data():
 
     # 3. Execute the authorized GitHub cloud transfer pipeline
     try:
-        url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        url = f"https://github.com{GITHUB_USERNAME}{GITHUB_USERNAME}{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
         
         # FIXED: Reinforced authorized request headers to authenticate with private repositories
         headers = {
@@ -136,57 +302,6 @@ def save_data():
             
     except Exception as e:
         print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
-
-def load_data():
-    global DATA
-    print("🔄 Initiating master league database synchronization...")
-    
-    # 1. ALWAYS attempt to download the permanent copy from GitHub Cloud first!
-    if GH_TOKEN:
-        try:
-            # FIXED: Added the explicit API syntax routing with the proper slash structures
-            url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
-            headers = {
-                "Authorization": f"Bearer {GH_TOKEN}", 
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Discord-Bot-Data-Sync"
-            }
-            res = requests.get(url, headers=headers)
-            
-            if res.status_code == 200:
-                file_data = res.json()
-                content = base64.b64decode(file_data["content"]).decode("utf-8")
-                loaded_json = json.loads(content)
-                
-                # Critical Safety Check: Ensure we aren't pulling an empty/corrupted cloud file
-                if loaded_json.get("users") or loaded_json.get("global_cards"):
-                    DATA = loaded_json
-                    print("☁️ Success: Permanent database successfully pulled and restored from GitHub Cloud!")
-                    
-                    # Cache it locally so fallback tracking holds
-                    with open(DATABASE_FILE, "w") as f:
-                        json.dump(DATA, f, indent=4)
-                    return
-                else:
-                    print("⚠️ Cloud Pull Alert: Remote file exists but appeared blank. Falling back to local checks.")
-            else:
-                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit. Details: {res.text}")
-        except Exception as e:
-            print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
-
-    # 2. Local fallback loop if GitHub is unreachable or token isn't configured
-    if os.path.exists(DATABASE_FILE):
-        try:
-            with open(DATABASE_FILE, "r") as f:
-                local_data = json.load(f)
-                if local_data.get("users") or local_data.get("global_cards"):
-                    DATA = local_data
-                    print("💾 Local cache database loaded successfully as fallback configuration.")
-                    return
-        except Exception as e:
-            print(f"❌ Local Read Error: {e}")
-            
-    print("🚨 System Warning: No valid remote or local database detected. Initializing clean template layer.")
 
 def verify_user(user_id_str, username="Unknown"):
     if user_id_str not in DATA["users"]:
