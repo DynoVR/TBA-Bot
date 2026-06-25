@@ -468,7 +468,7 @@ async def on_ready():
     print(f"🏒 Bot Online: {bot.user.name}")
     
     # REPLACE THIS NUMBER WITH YOUR REAL SERVER ID
-    MY_GUILD_ID = discord.Object(id=123456789012345678) 
+    MY_GUILD_ID = discord.Object(id=1225255717057986590) 
     
     # Register the commands to your specific server
     bot.tree.copy_global_to(guild=MY_GUILD_ID)
