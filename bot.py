@@ -105,6 +105,7 @@ def load_data():
         try:
             # FIXED LINK: Fully typed destination path to prevent connection resets
             url = "https://github.com"
+
             headers = {
                 "Authorization": f"Bearer {GH_TOKEN}", 
                 "Accept": "application/vnd.github.v3+json",
@@ -262,7 +263,7 @@ def save_data():
 
     # 3. Execute the authorized GitHub cloud transfer pipeline
     try:
-        url = f"https://github.com{GITHUB_USERNAME}{GITHUB_USERNAME}{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        url = "https://github.com"
         
         # FIXED: Reinforced authorized request headers to authenticate with private repositories
         headers = {
@@ -479,30 +480,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Application Command Tree Sync Fault: {e}")
 
-@bot.command(name="forcesync")
-async def forcesync(ctx):
-    """Bypasses all caches and forces absolute registration of every hybrid command."""
-    await ctx.defer()
-    try:
-        synced = await bot.tree.sync()
-        await ctx.send(f"✅ Master Force Sync Complete! Registered **{len(synced)}** slash layouts globally.")
-    except Exception as e:
-        await ctx.send(f"❌ Force Sync Crashed: {e}")
-
-# ==============================================================================
-# --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
-# ==============================================================================
-
-# Launch the local Flask server to keep Render web health checks green
-keep_alive()
-
-# Launch the primary bot client thread instance safely
-if TOKEN:
-    bot.run(TOKEN)
-else:
-    print("❌ Critical System Initialization Fault: 'DISCORD_TOKEN' environment key is blank.")
-
-@bot.command(name="forcesync")
+@bot.hybrid_command(name="forcesync", description="Force synchronizes command layout registries globally.")
 async def forcesync(ctx):
     """Bypasses all caches and forces absolute registration of every hybrid command."""
     await ctx.defer()
@@ -511,7 +489,6 @@ async def forcesync(ctx):
         await ctx.send(f"✅ Master Force Sync Complete! Registered **{len(synced)}** slash layouts to Discord servers.")
     except Exception as e:
         await ctx.send(f"❌ Force Sync Crashed: {e}")
-
 
 # ==============================================================================
 # --- SYSTEM MANAGEMENT & HELP MODULES ---
