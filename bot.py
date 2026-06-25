@@ -161,15 +161,13 @@ def save_data():
         return
 
     try:
-        # FIXED LINK: Fully typed destination path to prevent connection resets
+        # FIXED: Direct API endpoint connection layout pathing
         url = "https://github.com"
         
         headers = {
             "Authorization": f"token {GH_TOKEN}",
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "Discord-Bot-Data-Sync"
-        }
-
         }
         
         get_req = requests.get(url, headers=headers)
