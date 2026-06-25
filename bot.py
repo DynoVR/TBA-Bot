@@ -199,9 +199,6 @@ if "processed_neatque_matches" not in DATA:
 # ==============================================================================
 # --- AUTOMATED BACKGROUND AUDIT SEARCH ENGINE ---
 # ==============================================================================
-# ==============================================================================
-# --- AUTOMATED BACKGROUND TEXT MATRIX SCANNER (EXPLICIT CHANNELS) ---
-# ==============================================================================
 
 @tasks.loop(seconds=30)
 async def automatic_neatque_scanner():
@@ -727,104 +724,79 @@ async def editmatchreward(ctx, new_reward: int):
 # ==============================================================================
 
 @bot.event
-async def on_message(message: discord.Message):
-    # 1. Prevent loop traps
-    if message.author == bot.user:
+async def on_message_edit(before, after):
+    # 1. Ignore if the message wasn't sent by NeatQueue
+    if after.author.id != 857633321064595466 and after.author.name != "NeatQueue":
         return
 
-    # 2. Open gate check for NeatQueue, webhooks, or bots
-    is_neat = "neat" in message.author.name.lower() or message.author.id == 857633321064595466
-    is_external = message.webhook_id is not None or message.author.bot
-
-    if is_neat or is_external:
-        text_to_scan = ""
+    # 2. Check if the updated message contains embeds
+    if after.embeds:
+        embed = after.embeds[0]
         
-        if message.content:
-            text_to_scan += message.content + "\n"
+        # 3. Verify it changed from an open queue into a winner result card
+        if embed.title and "Winner For Queue" in embed.title:
             
-        # Deep matrix scan across ALL possible hidden string pockets inside NeatQueue's template layout
-        if message.embeds:
-            for embed in message.embeds:
-                if embed.title: 
-                    text_to_scan += f" [TITLE] {embed.title}\n"
-                if embed.description: 
-                    text_to_scan += f" [DESC] {embed.description}\n"
-                if embed.author and embed.author.name:
-                    text_to_scan += f" [AUTH] {embed.author.name}\n"
-                if embed.footer and embed.footer.text:
-                    text_to_scan += f" [FOOT] {embed.footer.text}\n"
-                for field in embed.fields:
-                    text_to_scan += f" [FIELD_NAME] {field.name} [FIELD_VALUE] {field.value}\n"
+            # Use the unique match number in the title (like Queue#2815) to prevent double payouts
+            match_id_match = re.search(r"(Queue#\d+)", embed.title)
+            match_unique_id = match_id_match.group(1) if match_id_match else str(after.id)
+            
+            if "processed_neatque_matches" not in DATA:
+                DATA["processed_neatque_matches"] = []
+                
+            if match_unique_id in DATA["processed_neatque_matches"]:
+                return # Match already paid out, skip it
 
-        clean_text_payload = text_to_scan.lower()
-
-        # Gatekeeper: Halt if this isn't an official winning summary report
-        if "winner" not in clean_text_payload and "queue" not in clean_text_payload:
-            return
-
-        winning_user_ids = []
-        losing_user_ids = []
-
-        # Download and compile live server name cache tables instantly
-        if message.guild:
-            try:
-                await message.guild.query_members(limit=250, cache=True)
-            except Exception as e:
-                print(f"Member cache fault: {e}")
-
-        # ADVANCED STEREOSCOPIC ID EXTRACTOR
-        # Captures underlying Discord account number keys (<@12345678>) directly out of horizontal string lines
-        winners_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\+)", text_to_scan)
-        losers_found = re.findall(r"<@!?(\d+)>(?=[^<>\n]*\-)", text_to_scan)
-
-        # FALLBACK: Plain character string parser if NeatQueue prints usernames instead of mentions
-        if not winners_found and not losers_found:
-            for line in text_to_scan.split("\n"):
-                if "+" in line:
-                    plain_win = re.findall(r"@([^+\-\n\s\(]+)", line)
-                    for name in plain_win:
-                        member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
-                        if member: 
-                            winning_user_ids.append(str(member.id))
-                elif "-" in line:
-                    plain_loss = re.findall(r"@([^+\-\n\s\(]+)", line)
-                    for name in plain_loss:
-                        member = discord.utils.get(message.guild.members, display_name=name) or discord.utils.get(message.guild.members, name=name)
-                        if member: 
-                            losing_user_ids.append(str(member.id))
-        else:
-            winning_user_ids = winners_found
-            losing_user_ids = losers_found
-
-        # 3. Apply database ledger rewards deposits
-        if winning_user_ids or losing_user_ids:
-            reward = DATA["config"].get("match_reward", 25)
-            awarded_mentions = []
-
-            for p_id in winning_user_ids:
-                p_str = str(p_id)
-                verify_user(p_str, f"User {p_str}")
-                DATA["users"][p_str]["coins"] += reward
-                DATA["users"][p_str]["wins"] += 1
-                awarded_mentions.append(f"<@{p_str}>")
-
-            for p_id in losing_user_ids:
-                p_str = str(p_id)
-                verify_user(p_str, f"User {p_str}")
-                DATA["users"][p_str]["losses"] += 1
-
-            # Save balances back permanently to GitHub cloud storage
-            save_data()
-
-            if awarded_mentions:
-                await message.channel.send(
-                    f"🪙 **NeatQueue Automated Link Synced!** Match column data processed.\n"
-                    f"The following winners have been credited with **{reward} coins**: "
-                    f"{', '.join(awarded_mentions)}"
-                )
-
-        await bot.process_commands(message)
-
+            # Extract the embedded text blocks
+            text_to_scan = embed.description or ""
+            if not text_to_scan and embed.fields:
+                text_to_scan = "\n".join([f"{f.name} {f.value}" for f in embed.fields])
+                
+            lines = text_to_scan.split("\n")
+            
+            winning_user_ids = []
+            losing_user_ids = []
+            
+            # 4. Scan line by line to locate user mentions and score signs (+/- followed by a number)
+            for line in lines:
+                match_user = re.search(r"<@!?(\d+)>", line)
+                if match_user:
+                    user_id_str = match_user.group(1)
+                    
+                    # Target explicit positive values (like +1, +31.2, +50, etc.)
+                    if re.search(r"\+\d+", line):
+                        winning_user_ids.append(user_id_str)
+                    # Target explicit negative values (like -14.8, -16.0, etc.)
+                    elif re.search(r"-\d+", line):
+                        losing_user_ids.append(user_id_str)
+            
+            # 5. Distribute coins if winners are found
+            if winning_user_ids:
+                reward_amount = DATA["config"].get("match_reward", 25)
+                awarded_mentions = []
+                
+                for p_id in winning_user_ids:
+                    verify_user(p_id, f"User {p_id}")
+                    DATA["users"][p_id]["coins"] += reward_amount
+                    DATA["users"][p_id]["wins"] += 1
+                    awarded_mentions.append(f"<@{p_id}>")
+                    
+                for p_id in losing_user_ids:
+                    verify_user(p_id, f"User {p_id}")
+                    DATA["users"][p_id]["losses"] += 1
+                
+                # Lock this match ID so it can never be processed again
+                DATA["processed_neatque_matches"].append(match_unique_id)
+                
+                # Push modifications to your local JSON and GitHub database
+                save_data()
+                
+                # Post validation details back to the queue channel
+                if awarded_mentions:
+                    await after.channel.send(
+                        f"🪙 **NeatQueue Edit Link Synced!** Match results registered.\n"
+                        f"The following winners have been credited with **{reward_amount} coins**: "
+                        f"{', '.join(awarded_mentions)}"
+                    )
 
 # --- Start Services ---
 keep_alive()
