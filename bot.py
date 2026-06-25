@@ -200,7 +200,17 @@ def verify_user(user_id_str, username="Unknown"):
             "name": username, "coins": 150, "inventory": {},
             "last_weekly": None, "wins": 0, "losses": 0
         }
-
+# --- Permission Check Decorators ---
+def is_staff():
+    async def predicate(ctx):
+        if ctx.author.id == ctx.guild.owner_id:
+            return True
+        staff_role_id = DATA["config"].get("staff_role_id")
+        if staff_role_id:
+            return any(str(role.id) == str(staff_role_id) for role in ctx.author.roles)
+        return any(role.name.lower() == "staff" for role in ctx.author.roles)
+    return commands.check(predicate)
+    
 # --- Bot Initialization Settings ---
 intents = discord.Intents.default()
 intents.members = True
