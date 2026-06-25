@@ -159,27 +159,22 @@ def save_data():
         return
 
     try:
+        # FIXED: Explicit backend API path prevents name resolution drops
         url = "https://github.com"
         
-        # FIXED HEADERS: Simplified metadata rules to cleanly pass GitHub security checks
+        # FIXED HEADERS: Streamlined security properties to pass GitHub authentication protocols
         headers = {
             "Authorization": f"token {GH_TOKEN}",
             "User-Agent": "Discord-Bot-Data-Sync"
         }
         
-        # 1. Fetch the tracking SHA from GitHub safely
+        # 1. Fetch current file tracking SHA code from GitHub safely
         get_req = requests.get(url, headers=headers)
-        print(f"📡 Save Sync: SHA Lookup Response Status Code: {get_req.status_code}")
-        
         sha = None
         if get_req.status_code == 200:
             sha = get_req.json().get("sha")
-        elif get_req.status_code == 404:
-            print("⚠️ Save Sync Alert: File does not exist in repo yet. Creating it fresh...")
-        else:
-            print(f"❌ Save Sync Warning: SHA lookup returned code {get_req.status_code}. Details: {get_req.text}")
         
-        # 2. Encode and package the live data dictionary structures
+        # 2. Package data streams into base64 payloads
         content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
         encoded_content = base64.b64encode(content_bytes).decode('utf-8')
         
@@ -190,14 +185,14 @@ def save_data():
         if sha:
             payload["sha"] = sha
             
-        # 3. Force the upload commit up to your main branch
+        # 3. Commit file updates directly to your live repo branch
         put_req = requests.put(url, headers=headers, json=payload)
-        print(f"📡 Save Sync: Put Commit Response Status Code: {put_req.status_code}")
         
         if put_req.status_code in (200, 201):
             print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
         else:
             print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
+            
     except Exception as e:
         print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
 
@@ -415,25 +410,37 @@ async def help_command(ctx):
     embed = discord.Embed(title="🏒 League System Command Directory", color=discord.Color.blue())
     embed.add_field(name="🌐 Public Card Commands", value="`/catalog [page]` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_id> <their_card_id>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
     embed.add_field(name="⚔️ Matchmaking Commands", value="`/setupqueue <size>` - Deploy interactive match waiting panel\n`Buttons` - Join/Leave queue pool interface nodes", inline=False)
-    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <player> <rarity> <overall> [image_url]` - Initialize new custom card ID profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <give/take> <player> <amount>` - Change balance values safely\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
+    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/ <player> <rarity> <overall> [image_url]` - Initialize new custom card ID profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <give/take> <player> <amount>` - Change balance values safely\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
     await ctx.send(embed=embed)
 
 # ==============================================================================
 # --- CARD SYSTEM ENGINE ---
 # ==============================================================================
 
-@bot.hybrid_command(name="addcard", description="Staff Command: Initialize a new player card instance profile into catalog records")
+@bot.hybrid_command(name="addcard", description="Staff Command: Initialize a new card profile instance into catalog records")
 @is_staff()
 @app_commands.choices(rarity=[app_commands.Choice(name=r, value=r) for r in RARITY_ORDER])
-async def addcard(ctx, player: discord.Member, rarity: str, overall: int, image_url: str = None):
-    # Generates a clean random string identifier tag for that explicit card instance version
-    card_id = f"{player.name.lower()}_{rarity.lower()}_{random.randint(100, 999)}"
+async def addcard(ctx, rarity: str, overall: int, player: discord.Member = None, specialty_title: str = None, image_url: str = None):
+    # Field conditional router: specialty rules isolation mapping
+    if rarity == "Specialty":
+        if not specialty_title:
+            return await ctx.send("❌ **Input Error:** You must provide a custom text parameter inside `specialty_title` when creating Specialty rarity items.")
+        card_name = specialty_title
+        player_id_str = "0"
+        card_id = f"specialty_{clean_text := re.sub(r'[^a-z0-9]', '', specialty_title.lower())}_{random.randint(100, 999)}"
+    else:
+        if not player:
+            return await ctx.send("❌ **Input Error:** You must select a target user inside the `player` field option for standard card rarities.")
+        card_name = player.display_name
+        player_id_str = str(player.id)
+        card_id = f"{player.name.lower()}_{rarity.lower()}_{random.randint(100, 999)}"
+
     DATA["global_cards"][card_id] = {
-        "id": card_id, "name": player.display_name, "player_id": str(player.id),
+        "id": card_id, "name": card_name, "player_id": player_id_str,
         "rarity": rarity, "overall": max(1, min(overall, 99)), "image_url": image_url or ""
     }
     save_data()
-    await ctx.send(f"✅ Created Card Profile ID: `{card_id}` for **{player.display_name}**! [{rarity} | {overall} OVR]")
+    await ctx.send(f"✅ **Created Card Profile ID:** `{card_id}` for **{card_name}**! [{rarity} | {overall} OVR]")
 
 @bot.hybrid_command(name="editcard", description="Staff Command: Modify the rarity, overall, or picture assets of a precise unique card identity code")
 @is_staff()
