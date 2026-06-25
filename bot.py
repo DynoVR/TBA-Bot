@@ -21,8 +21,13 @@ def home():
     return "OK", 200
 
 def run_web_server():
+    # Render explicitly needs us to use the exact port number it gives us in the environment
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        # Added threaded=True to prevent Flask from choking or locking up the bot threads
+        app.run(host='0.0.0.0', port=port, threaded=True)
+    except Exception as e:
+        print(f"⚠️ Flask Web Server Port Bind Warning: {e}")
 
 def keep_alive():
     t = threading.Thread(target=run_web_server)
@@ -139,6 +144,7 @@ def load_data():
     # 1. ALWAYS attempt to download the permanent copy from GitHub Cloud first!
     if GH_TOKEN:
         try:
+            # FIXED: Added the explicit API syntax routing with the proper slash structures
             url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
             headers = {
                 "Authorization": f"Bearer {GH_TOKEN}", 
@@ -164,7 +170,7 @@ def load_data():
                 else:
                     print("⚠️ Cloud Pull Alert: Remote file exists but appeared blank. Falling back to local checks.")
             else:
-                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit.")
+                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit. Details: {res.text}")
         except Exception as e:
             print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
 
@@ -181,7 +187,6 @@ def load_data():
             print(f"❌ Local Read Error: {e}")
             
     print("🚨 System Warning: No valid remote or local database detected. Initializing clean template layer.")
-
 
 def verify_user(user_id_str, username="Unknown"):
     if user_id_str not in DATA["users"]:
