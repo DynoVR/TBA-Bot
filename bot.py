@@ -425,9 +425,12 @@ async def addcard(ctx, rarity: str, overall: int, player: discord.Member = None,
     if rarity == "Specialty":
         if not specialty_title:
             return await ctx.send("❌ **Input Error:** You must provide a custom text parameter inside `specialty_title` when creating Specialty rarity items.")
+        
+        # FIXED: Cleans the text on a separate line to avoid inline f-string crashes
+        clean_text = re.sub(r'[^a-z0-9]', '', specialty_title.lower())
         card_name = specialty_title
         player_id_str = "0"
-        card_id = f"specialty_{clean_text := re.sub(r'[^a-z0-9]', '', specialty_title.lower())}_{random.randint(100, 999)}"
+        card_id = f"specialty_{clean_text}_{random.randint(100, 999)}"
     else:
         if not player:
             return await ctx.send("❌ **Input Error:** You must select a target user inside the `player` field option for standard card rarities.")
@@ -439,6 +442,8 @@ async def addcard(ctx, rarity: str, overall: int, player: discord.Member = None,
         "id": card_id, "name": card_name, "player_id": player_id_str,
         "rarity": rarity, "overall": max(1, min(overall, 99)), "image_url": image_url or ""
     }
+    
+    # Securely saves to both your local cache and GitHub Cloud
     save_data()
     await ctx.send(f"✅ **Created Card Profile ID:** `{card_id}` for **{card_name}**! [{rarity} | {overall} OVR]")
 
