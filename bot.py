@@ -465,21 +465,25 @@ async def automatic_neatque_scanner():
 
 @bot.event
 async def on_ready():
-    print(f"🏒 Bot Online: {bot.user.name}")
+    print(f"🏒 Bot Online: Connected as {bot.user.name}")
     
-    # REPLACE THIS NUMBER WITH YOUR REAL SERVER ID
-    MY_GUILD_ID = discord.Object(id=1225255717057986590) 
-    
-    # Register the commands to your specific server
-    bot.tree.copy_global_to(guild=MY_GUILD_ID)
-    try:
-        synced = await bot.tree.sync(guild=MY_GUILD_ID)
-        print(f"✅ Successfully synced {len(synced)} commands to your server.")
-    except Exception as e:
-        print(f"❌ Sync Error: {e}")
+    # Verify our data configuration parameters are fully loaded
+    if not DATA.get("users") and not DATA.get("global_cards"):
+        print("⚠️ Data Alert: Master database structure is completely empty.")
+    else:
+        print(f"✅ Data Active: Verified {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
 
+    # Start your background loop safely
     if not automatic_neatque_scanner.is_running():
         automatic_neatque_scanner.start()
+        print("🚀 Automated NeatQueue background scanner engine started safely.")
+        
+    # GLOBAL SYNC: Registers commands globally so they work in your server
+    try:
+        synced = await bot.tree.sync()
+        print(f"🌲 Successfully synchronized {len(synced)} application slash commands globally.")
+    except Exception as e:
+        print(f"❌ Application Command Tree Sync Fault: {e}")
 
 # ==============================================================================
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
