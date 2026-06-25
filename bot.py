@@ -717,6 +717,11 @@ async def buypack(ctx, pack_size: int):
 
 
 @bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
+# ==============================================================================
+# --- LEDGER VAULTS MODULES ---
+# ==============================================================================
+
+@bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
 async def claimweekly(ctx):
     if not DATA["global_cards"]: 
         return await ctx.send("❌ Empty directories.")
@@ -739,17 +744,15 @@ async def claimweekly(ctx):
         lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
         
     DATA["users"][u_id]["last_weekly"] = now.isoformat()
+    save_data()
+    await ctx.send(embed=discord.Embed(title="📅 Weekly Rewards Allocated!", description="\n".join(lines), color=discord.Color.green()))
 
-    # ==============================================================================
-# --- LEDGER VAULTS MODULES ---
-# ==============================================================================
 
 @bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix")
 async def catalog(ctx, page: int = 1):
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
-    # Sort master cards from rarest to most common, and highest overall to lowest
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
         key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]), -x[1]["overall"])
@@ -804,77 +807,7 @@ async def inventory(ctx, player: discord.Member = None):
     )
     embed.add_field(name="Coins Wallet", value=f"{DATA['users'][t_id]['coins']} 🪙", inline=False)
     await ctx.send(embed=embed)
-
-    save_data()
-    await ctx.send(embed=discord.Embed(title="📅 Weekly Rewards Allocated!", description="\n".join(lines), color=discord.Color.green()))
-
-    grouped = {r: [] for r in RARITY_ORDER}
-    for c_id, c in DATA["global_cards"].items(): grouped[c["rarity"]].append(c_id)
-
-# ==============================================================================
-# --- INTERACTION TRADING MODULES ---
-# ==============================================================================
-
-class TradeView(discord.ui.View):
-    def __init__(self, sender, receiver, s_card, r_card):
-        super().__init__(timeout=120)
-        self.sender = sender
-        self.receiver = receiver
-        self.s_card = s_card
-        self.r_card = r_card
-
-    @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.receiver.id: 
-            return await interaction.response.send_message("❌ Target party authorization bind error.", ephemeral=True)
-            
-        s_id, r_id = str(self.sender.id), str(self.receiver.id)
-        s_inv = DATA["users"][s_id]["inventory"]
-        r_inv = DATA["users"][r_id]["inventory"]
-        
-        if s_inv.get(self.s_card, 0) < 1 or r_inv.get(self.r_card, 0) < 1:
-            return await interaction.response.send_message("❌ Items mismatch: Assets transferred positions outside tracking blocks.", ephemeral=True)
-            
-        s_inv[self.s_card] -= 1
-        r_inv[self.r_card] -= 1
-        
-        s_inv[self.r_card] = s_inv.get(self.r_card, 0) + 1
-        r_inv[self.s_card] = r_inv.get(self.s_card, 0) + 1
-        
-        save_data()
-        self.stop()
-        await interaction.response.edit_message(content=f"✅ Trade Executed! Swapped items successfully between {self.sender.mention} and {self.receiver.mention}.", view=None)
-
-    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id not in (self.sender.id, self.receiver.id): 
-            return await interaction.response.send_message("❌ Access Restricted: You are not a participant in this transaction loop.", ephemeral=True)
-            
-        self.stop()
-        await interaction.response.edit_message(content="🛑 Trade Cancelled. Propose transaction rejected.", view=None)
-
-
-@bot.hybrid_command(name="trade", description="Public Command: Initiate an asset swap transaction with another user")
-async def trade(ctx, target_player: discord.Member, your_card_id: str, their_card_id: str):
-    if target_player == ctx.author: 
-        return await ctx.send("❌ Self cycle blocked.")
-        
-    s_id, r_id = str(ctx.author.id), str(target_player.id)
-    verify_user(s_id, ctx.author.display_name)
-    verify_user(r_id, target_player.display_name)
     
-    if your_card_id not in DATA["global_cards"] or their_card_id not in DATA["global_cards"]:
-        return await ctx.send("❌ Error: One or both card identity ID strings do not exist.")
-        
-    if DATA["users"][s_id]["inventory"].get(your_card_id, 0) < 1: 
-        return await ctx.send("❌ Error: You do not own that item asset identifier.")
-        
-    if DATA["users"][r_id]["inventory"].get(their_card_id, 0) < 1: 
-        return await ctx.send("❌ Error: Target user does not own requested item asset.")
-        
-    view = TradeView(ctx.author, target_player, your_card_id, their_card_id)
-    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} wants to swap their {DATA['global_cards'][your_card_id]['name']} ({your_card_id}) for your {DATA['global_cards'][their_card_id]['name']} ({their_card_id}). Do you accept?", view=view)
-
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
 # ==============================================================================
