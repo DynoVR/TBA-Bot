@@ -98,103 +98,59 @@ DATA = {
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
 
+# --- External Cloud Database Environment Routing Configuration ---
+DB_URL = os.environ.get("DB_URL")
+DB_KEY = os.environ.get("DB_KEY")
+
 def load_data():
     global DATA
-    print("🔄 Initiating master league database synchronization...")
+    print("🔄 Connecting to External Cloud Database Service...")
     
-    if GH_TOKEN:
-        try:
-            url = "https://github.com"
-            headers = {
-                "Authorization": f"token {GH_TOKEN}", 
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Discord-Bot-Data-Sync"
-            }
-            res = requests.get(url, headers=headers)
-            print(f"📡 GitHub Cloud Pull Status Response: {res.status_code}")
-            
-            if res.status_code == 200:
-                file_data = res.json()
-                content = base64.b64decode(file_data["content"]).decode("utf-8")
-                loaded_json = json.loads(content)
-                
-                if isinstance(loaded_json, dict) and ("users" in loaded_json or "global_cards" in loaded_json):
-                    DATA = loaded_json
-                    print(f"☁️ Success: Permanent database restored from GitHub Cloud! Profiles: {len(DATA.get('users', {}))}, Cards: {len(DATA.get('global_cards', {}))}")
-                    
-                    with open(DATABASE_FILE, "w") as f:
-                        json.dump(DATA, f, indent=4)
-                    return
-                else:
-                    print("⚠️ Cloud Pull Alert: Format is invalid. Checking local fallback cached file.")
-            else:
-                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): Could not fetch cloud file.")
-        except Exception as e:
-            print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
-
-    if os.path.exists(DATABASE_FILE):
-        try:
-            with open(DATABASE_FILE, "r") as f:
-                local_data = json.load(f)
-                if isinstance(local_data, dict) and ("users" in local_data or "global_cards" in local_data):
-                    DATA = local_data
-                    print("💾 Local cache database loaded successfully as fallback configuration.")
-                    return
-        except Exception as e:
-            print(f"❌ Local Read Error: {e}")
-            
-    print("🚨 System Warning: No valid remote or local database detected. Preserving baseline template.")
-
-def save_data():
-    """Saves data locally and forces an authorized backup commit to GitHub Cloud securely."""
-    try:
-        with open(DATABASE_FILE, "w") as f:
-            json.dump(DATA, f, indent=4)
-        print("💾 System state written to local cache successfully.")
-    except Exception as e:
-        print(f"❌ Local Write Fault: {e}")
-
-    if not GH_TOKEN:
-        print("⚠️ Warning: 'GH_TOKEN' environment key missing. Cloud sync skipped.")
+    if not DB_URL or not DB_KEY:
+        print("🚨 System Warning: Cloud Database 'DB_URL' or 'DB_KEY' missing in Render Environment dashboard!")
         return
 
     try:
-        # FIXED: Explicit backend API path prevents name resolution drops
-        url = "https://github.com"
-        
-        # FIXED HEADERS: Streamlined security properties to pass GitHub authentication protocols
+        # Request headers to authenticate and pull your live data
         headers = {
-            "Authorization": f"token {GH_TOKEN}",
-            "User-Agent": "Discord-Bot-Data-Sync"
+            "X-Master-Key": DB_KEY,
+            "X-Bin-Meta": "false"  # Discards metadata to give you raw JSON instantly
         }
+        res = requests.get(DB_URL, headers=headers)
+        print(f"📡 Cloud Database Fetch Status Response Code: {res.status_code}")
         
-        # 1. Fetch current file tracking SHA code from GitHub safely
-        get_req = requests.get(url, headers=headers)
-        sha = None
-        if get_req.status_code == 200:
-            sha = get_req.json().get("sha")
-        
-        # 2. Package data streams into base64 payloads
-        content_bytes = json.dumps(DATA, indent=4).encode('utf-8')
-        encoded_content = base64.b64encode(content_bytes).decode('utf-8')
-        
-        payload = {
-            "message": "🔄 Automated Live Database State Backup Sync",
-            "content": encoded_content
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        # 3. Commit file updates directly to your live repo branch
-        put_req = requests.put(url, headers=headers, json=payload)
-        
-        if put_req.status_code in (200, 201):
-            print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
-        else:
-            print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
-            
+        if res.status_code == 200:
+            loaded_json = res.json()
+            if isinstance(loaded_json, dict):
+                DATA = loaded_json
+                print(f"☁️ Cloud Success! Restored {len(DATA.get('users', {}))} profiles and {len(DATA.get('global_cards', {}))} card configurations.")
+                return
+        print(f"❌ Cloud Pull Bypass Error ({res.status_code}): Data pull failed.")
     except Exception as e:
-        print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
+        print(f"❌ Cloud Database Connection Fault: {e}")
+
+
+def save_data():
+    """Forces an absolute synchronous write commit directly to your private cloud storage endpoint."""
+    if not DB_URL or not DB_KEY:
+        print("⚠️ Save Sync Skipped: External cloud credentials uninitialized.")
+        return
+
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "X-Master-Key": DB_KEY
+        }
+        # Instantly overwrites the remote file with your live memory status
+        put_req = requests.put(DB_URL, headers=headers, json=DATA)
+        print(f"📡 Cloud Database Save Sync Status Response Code: {put_req.status_code}")
+        
+        if put_req.status_code == 200:
+            print("☁️ Permanent database securely backed up to Cloud endpoint successfully!")
+        else:
+            print(f"❌ Cloud API Sync Failed ({put_req.status_code}): {put_req.text}")
+    except Exception as e:
+        print(f"❌ External Cloud Save Pipeline Crash: {e}")
 
 def verify_user(user_id_str, username="Unknown"):
     if "users" not in DATA:
