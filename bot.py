@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import os
 import io
@@ -12,10 +12,7 @@ import re
 from datetime import datetime, timedelta
 from flask import Flask
 
-# --- Flask Keep-Alive Web Server ---
-# ==============================================================================
-# --- FIXED FLASK KEEP-ALIVE WEB SERVER ARCHITECTURE ---
-# ==============================================================================
+# --- Flask Keep-Alive Web Server Architecture ---
 app = Flask('')
 
 @app.route('/')
@@ -27,9 +24,7 @@ if not hasattr(app, "_already_running"):
 
 def run_web_server():
     if app._already_running:
-        print("ℹ️ Flask loop bypass: Server instance already established.")
         return
-        
     port = int(os.environ.get("PORT", 8080))
     try:
         app._already_running = True
@@ -43,24 +38,17 @@ def keep_alive():
     t.start()
 
 
-# --- Configuration & Security ---
-# --- Configuration & Security ---
+# --- System Environment Configurations ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
 DATABASE_FILE = "card_league_database.json"
+DB_URL = os.environ.get("DB_URL")
+DB_KEY = os.environ.get("DB_KEY")
 
-# --- GitHub Auto-Sync Save System Configurations ---
-GITHUB_USERNAME = "DynoVR"
-GITHUB_REPO = "TBA-Bot"
-GITHUB_FILE_PATH = "card_league_database.json"
-GH_TOKEN = os.environ.get("GH_TOKEN")
-
-# Ordered priority mapping for sorted card ledger structures
+# --- Sorted Card Ledger Constants ---
 RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
-
-# Global Tracker Container for Matchmaking Queues
 ACTIVE_QUEUES = {1: [], 2: [], 3: []}
 
-# --- Complete Consolidated Database System ---
+# --- Baseline Database Template Layer ---
 DATA = {
     "season_title": "TBA League",
     "games_count": 0,
@@ -94,13 +82,17 @@ DATA = {
     }
 }
 
+# --- Core Bot Client Initialization ---
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+bot.remove_command("help")
+
+
 # ==============================================================================
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
-
-# --- External Cloud Database Environment Routing Configuration ----
-DB_URL = os.environ.get("DB_URL")
-DB_KEY = os.environ.get("DB_KEY")
 
 def load_data():
     global DATA
@@ -111,7 +103,6 @@ def load_data():
         return
 
     try:
-        # FIXED: Jsonbin.io explicitly requires 'X-Master-Key' to authenticate properly
         headers = {
             "X-Master-Key": DB_KEY,
             "X-Bin-Meta": "false"
@@ -128,7 +119,6 @@ def load_data():
         else:
             print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
     except Exception as e:
-        # FIXED: This will now print the exact error to your logs instead of staying silent!
         print(f"❌ Cloud Database Connection Fault: {e}")
 
 
@@ -153,10 +143,10 @@ def save_data():
     except Exception as e:
         print(f"❌ External Cloud Save Pipeline Crash: {e}")
 
+
 def verify_user(user_id_str, username="Unknown"):
     global DATA
     
-    # SAFETY LOCK: If data hasn't finished loading yet, force an immediate pull
     if not DATA or "users" not in DATA:
         print("⚠️ verify_user caught a race condition! Forcing database reload to protect player vaults...")
         if DB_URL and DB_KEY:
@@ -168,11 +158,9 @@ def verify_user(user_id_str, username="Unknown"):
             except Exception as e:
                 print(f"❌ Force pull inside verify_user failed: {e}")
 
-    # Double safeguard: ensuring core nested nodes exist in memory
     if "users" not in DATA:
         DATA["users"] = {}
         
-    # Standard account initialization bounds mapping
     if user_id_str not in DATA["users"]:
         DATA["users"][user_id_str] = {
             "name": username, 
@@ -182,6 +170,7 @@ def verify_user(user_id_str, username="Unknown"):
             "wins": 0, 
             "losses": 0
         }
+
 
 # --- Permission Check Decorators ---
 def is_staff():
@@ -193,20 +182,6 @@ def is_staff():
             return any(str(role.id) == str(staff_role_id) for role in ctx.author.roles)
         return any(role.name.lower() == "staff" for role in ctx.author.roles)
     return commands.check(predicate)
-    
-# --- Bot Initialization Settings ---
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-bot.remove_command("help")
-
-from discord.ext import tasks
-
-# Track processed message IDs so players never receive duplicate coin payouts
-if "processed_neatque_matches" not in DATA:
-    DATA["processed_neatque_matches"] = []
 
 # ==============================================================================
 # --- AUTOMATED BACKGROUND AUDIT SEARCH ENGINE ---
