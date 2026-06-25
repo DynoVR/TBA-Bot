@@ -98,7 +98,7 @@ DATA = {
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
 
-# --- External Cloud Database Environment Routing Configuration ---
+# --- External Cloud Database Environment Routing Configuration ----
 DB_URL = os.environ.get("DB_URL")
 DB_KEY = os.environ.get("DB_KEY")
 
@@ -111,10 +111,10 @@ def load_data():
         return
 
     try:
-        # Request headers to authenticate and pull your live data
+        # FIXED: Jsonbin.io explicitly requires 'X-Master-Key' to authenticate properly
         headers = {
             "X-Master-Key": DB_KEY,
-            "X-Bin-Meta": "false"  # Discards metadata to give you raw JSON instantly
+            "X-Bin-Meta": "false"
         }
         res = requests.get(DB_URL, headers=headers)
         print(f"📡 Cloud Database Fetch Status Response Code: {res.status_code}")
@@ -125,8 +125,10 @@ def load_data():
                 DATA = loaded_json
                 print(f"☁️ Cloud Success! Restored {len(DATA.get('users', {}))} profiles and {len(DATA.get('global_cards', {}))} card configurations.")
                 return
-        print(f"❌ Cloud Pull Bypass Error ({res.status_code}): Data pull failed.")
+        else:
+            print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
     except Exception as e:
+        # FIXED: This will now print the exact error to your logs instead of staying silent!
         print(f"❌ Cloud Database Connection Fault: {e}")
 
 
@@ -141,7 +143,6 @@ def save_data():
             "Content-Type": "application/json",
             "X-Master-Key": DB_KEY
         }
-        # Instantly overwrites the remote file with your live memory status
         put_req = requests.put(DB_URL, headers=headers, json=DATA)
         print(f"📡 Cloud Database Save Sync Status Response Code: {put_req.status_code}")
         
