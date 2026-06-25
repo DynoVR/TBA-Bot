@@ -59,10 +59,10 @@ DATA = {
     "matches": {},       # match_id -> { channel_id, type, team1: [], team2: [], votes: {player_id: vote_int} }
     "next_match_id": 1,
     "config": {
-        "pack_3_price": 50,
-        "pack_5_price": 80,
-        "pack_10_price": 150,
-        "match_reward": 25,
+        "pack_3_price": 150,
+        "pack_5_price": 250,
+        "pack_10_price": 400,
+        "match_reward": 50,
         "queue_role_id": None,
         "match_role_id": None,
         "sell_prices": {
@@ -73,7 +73,7 @@ DATA = {
             "Pro": 150,
             "Juggernaut": 300,
             "Otherworldly": 750,
-            "Specialty": 1500
+            "Specialty": 1000
         }
     }
 }
