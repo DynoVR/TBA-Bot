@@ -134,35 +134,54 @@ def save_data():
 
 def load_data():
     global DATA
-    # 1. Attempt to read locally first
-    if os.path.exists(DATABASE_FILE):
-        try:
-            with open(DATABASE_FILE, "r") as f:
-                DATA = json.load(f)
-                print("💾 Local database loaded successfully.")
-                return
-        except Exception as e:
-            print(f"Local Read Error: {e}")
-
-    # 2. If local file is missing, pull the permanent copy directly from GitHub Cloud!
+    print("🔄 Initiating master league database synchronization...")
+    
+    # 1. ALWAYS attempt to download the permanent copy from GitHub Cloud first!
     if GH_TOKEN:
         try:
             url = f"https://github.com{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
-            headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+            headers = {
+                "Authorization": f"Bearer {GH_TOKEN}", 
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "Discord-Bot-Data-Sync"
+            }
             res = requests.get(url, headers=headers)
             
             if res.status_code == 200:
                 file_data = res.json()
                 content = base64.b64decode(file_data["content"]).decode("utf-8")
-                DATA = json.loads(content)
-                print("☁️ Permanent database successfully pulled and restored from GitHub Cloud!")
+                loaded_json = json.loads(content)
                 
-                with open(DATABASE_FILE, "w") as f:
-                    json.dump(DATA, f, indent=4)
+                # Critical Safety Check: Ensure we aren't pulling an empty/corrupted cloud file
+                if loaded_json.get("users") or loaded_json.get("global_cards"):
+                    DATA = loaded_json
+                    print("☁️ Success: Permanent database successfully pulled and restored from GitHub Cloud!")
+                    
+                    # Cache it locally so fallback tracking holds
+                    with open(DATABASE_FILE, "w") as f:
+                        json.dump(DATA, f, indent=4)
+                    return
+                else:
+                    print("⚠️ Cloud Pull Alert: Remote file exists but appeared blank. Falling back to local checks.")
             else:
-                print(f"⚠️ Cloud Pull Failed ({res.status_code}): No remote backup found yet.")
+                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit.")
         except Exception as e:
-            print(f"GitHub Cloud Pull Fault: {e}")
+            print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
+
+    # 2. Local fallback loop if GitHub is unreachable or token isn't configured
+    if os.path.exists(DATABASE_FILE):
+        try:
+            with open(DATABASE_FILE, "r") as f:
+                local_data = json.load(f)
+                if local_data.get("users") or local_data.get("global_cards"):
+                    DATA = local_data
+                    print("💾 Local cache database loaded successfully as fallback configuration.")
+                    return
+        except Exception as e:
+            print(f"❌ Local Read Error: {e}")
+            
+    print("🚨 System Warning: No valid remote or local database detected. Initializing clean template layer.")
+
 
 def verify_user(user_id_str, username="Unknown"):
     if user_id_str not in DATA["users"]:
@@ -437,6 +456,162 @@ async def removecard(ctx, card_id: str):
 # ==============================================================================
 # --- CARD PACK DRAW ENGINE & STORE SYSTEMS ---
 # ==============================================================================
+
+# ==============================================================================
+# --- INTERACTIVE CARD LIQUIDATION ENGINE & STORE SYSTEMS ---
+# ==============================================================================
+
+@bot.hybrid_command(name="changecardprice", description="Staff Command: Configure how much currency a player receives when selling a specific rarity")
+@is_staff()
+@app_commands.choices(rarity=[app_commands.Choice(name=r, value=r) for r in RARITY_ORDER])
+async def changecardprice(ctx, rarity: str, new_sell_price: int):
+    if new_sell_price < 0:
+        return await ctx.send("❌ **Fault:** Sell price valuations cannot evaluate to negative metrics.")
+
+    # Safeguard underlying nested layout keys
+    if "config" not in DATA: DATA["config"] = {}
+    if "sell_prices" not in DATA["config"]: DATA["config"]["sell_prices"] = {}
+
+    DATA["config"]["sell_prices"][rarity] = new_sell_price
+    save_data()
+    
+    await ctx.send(f"🏷️ **Rarity Market Configured!** Selling a **[{rarity}]** card asset will now credit players with `{new_sell_price}` coins.")
+
+
+class SellQuantityModal(discord.ui.Modal):
+    """Secure popup textbox frame to input explicit quantity parameters for liquidation transactions."""
+    quantity_input = discord.ui.TextInput(
+        label="Quantity to Sell",
+        placeholder="Enter a whole number (e.g. 1, 2, 5)...",
+        min_length=1,
+        max_length=4,
+        required=True
+    )
+
+    def __init__(self, card_id: str, card_name: str, rarity: str, owned_count: int, unit_price: int):
+        super().__init__(title=f"Sell: {card_name}")
+        self.card_id = card_id
+        self.card_name = card_name
+        self.rarity = rarity
+        self.owned_count = owned_count
+        self.unit_price = unit_price
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        raw_val = self.quantity_input.value.strip()
+
+        # Enforce structural sanitization bounds
+        if not raw_val.isdigit():
+            return await interaction.response.send_message("❌ **Transaction Denied:** Please enter a valid, positive whole number.", ephemeral=True)
+
+        qty_to_sell = int(raw_val)
+        if qty_to_sell <= 0:
+            return await interaction.response.send_message("❌ **Transaction Denied:** Liquidation amount parameters must be greater than 0.", ephemeral=True)
+
+        # Cross-reference live possession counts to eliminate item duplication loops
+        current_owned = DATA["users"][user_id]["inventory"].get(self.card_id, 0)
+        if qty_to_sell > current_owned:
+            return await interaction.response.send_message(
+                f"❌ **Vault Mismatch:** You chose to liquidate `{qty_to_sell}` copies, but you only own `{current_owned}` of this card profile item.",
+                ephemeral=True
+            )
+
+        # Process ledger financial transfer settlements
+        total_payout = qty_to_sell * self.unit_price
+        DATA["users"][user_id]["inventory"][self.card_id] -= qty_to_sell
+        DATA["users"][user_id]["coins"] += total_payout
+        
+        save_data()
+
+        embed = discord.Embed(title="💰 Vault Assets Liquidated!", color=discord.Color.green())
+        embed.description = (
+            f"Successfully sold **{qty_to_sell}x** **[{self.rarity}] {self.card_name}**!\n\n"
+            f"• **Unit Valuation Price:** `{self.unit_price}` coins\n"
+            f"• **Total Earnings Deposited:** `+{total_payout}` coins 🪙\n"
+            f"• **Remaining Balance:** `{DATA['users'][user_id]['coins']}` coins"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=False)
+
+
+class SellCardDropdown(discord.ui.Select):
+    """Dynamic inventory mapping interface listing owned cards ready for market trade pipelines."""
+    def __init__(self, options_list):
+        super().__init__(placeholder="Select which player card you want to liquidate...", min_values=1, max_values=1, options=options_list)
+
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        card_id = self.values[0]
+
+        # Ensure account files still register target assets
+        if card_id not in DATA["global_cards"] or DATA["users"][user_id]["inventory"].get(card_id, 0) <= 0:
+            return await interaction.response.send_message("❌ **Error:** Asset target missing or already sold.", ephemeral=True)
+
+        card = DATA["global_cards"][card_id]
+        rarity = card["rarity"]
+        owned_count = DATA["users"][user_id]["inventory"][card_id]
+
+        # Calculate live price metrics out of config data trees
+        sell_prices_dict = DATA["config"].get("sell_prices", {})
+        unit_price = sell_prices_dict.get(rarity, 10)  # Default fallback price setting if unset
+
+        # Open the quantity select popup terminal screen form input node
+        modal = SellQuantityModal(
+            card_id=card_id, 
+            card_name=card["name"], 
+            rarity=rarity, 
+            owned_count=owned_count, 
+            unit_price=unit_price
+        )
+        await interaction.response.send_modal(modal)
+
+
+class SellCardView(discord.ui.View):
+    def __init__(self, options_list):
+        super().__init__(timeout=60.0)
+        self.add_item(SellCardDropdown(options_list))
+
+
+@bot.hybrid_command(name="sellcard", description="Public Command: Select and liquidate duplicate player cards for economy coins")
+async def sellcard(ctx):
+    user_id = str(ctx.author.id)
+    verify_user(user_id, ctx.author.display_name)
+
+    inventory_ledger = DATA["users"][user_id].get("inventory", {})
+    valid_owned_cards = []
+
+    # Map cards currently in user inventory
+    for cid, count in inventory_ledger.items():
+        if count > 0 and cid in DATA["global_cards"]:
+            valid_owned_cards.append((cid, DATA["global_cards"][cid], count))
+
+    if not valid_owned_cards:
+        return await ctx.send("🎒 **Vault Empty:** You do not own any player card assets inside your vault directory right now.")
+
+    # Sort items by structural system configs mapping to present cleanly
+    valid_owned_cards.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
+
+    sell_prices_dict = DATA["config"].get("sell_prices", {})
+    dropdown_options = []
+
+    # Build active dropdown interaction options lists (Discord caps selections layout to 25 items max per field view node row)
+    for cid, card, count in valid_owned_cards[:25]:
+        price = sell_prices_dict.get(card["rarity"], 10)
+        dropdown_options.append(discord.SelectOption(
+            label=f"{card['name']} ({card['overall']} OVR)",
+            description=f"Rarity: {card['rarity']} | Owned: x{count} | Payout: {price} coins/ea",
+            value=cid,
+            emoji="🎴"
+        ))
+
+    embed = discord.Embed(
+        title="🏦 League Player Liquidation Asset Market", 
+        description="Select a player item from the dropdown deck directory menu layer below to access the quantity settlement ledger box.",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text="Trading window terminal closes automatically after 60 seconds of inactivity.")
+
+    view = SellCardView(dropdown_options)
+    await ctx.send(embed=embed, view=view, ephemeral=True)
 
 def draw_random_cards(count: int) -> list:
     """Helper algorithm to select card IDs based on probability distributions."""
@@ -771,7 +946,7 @@ async def on_message_edit(before, after):
             
             # 5. Distribute coins if winners are found
             if winning_user_ids:
-                reward_amount = DATA["config"].get("match_reward", 25)
+                reward_amount = DATA["config"].get("match_reward", 50)
                 awarded_mentions = []
                 
                 for p_id in winning_user_ids:
