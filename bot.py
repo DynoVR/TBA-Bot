@@ -93,7 +93,6 @@ bot.remove_command("help")
 # ==============================================================================
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
-
 def load_data():
     global DATA
     print("🔄 Connecting to External Cloud Database Service...")
@@ -114,13 +113,19 @@ def load_data():
             loaded_json = res.json()
             if isinstance(loaded_json, dict):
                 DATA = loaded_json
+                
+                # AUTOMATED RECOVERY: Ensure critical base dictionary layers exist
+                if "global_cards" not in DATA: DATA["global_cards"] = {}
+                if "users" not in DATA: DATA["users"] = {}
+                if "processed_neatque_matches" not in DATA: DATA["processed_neatque_matches"] = []
+                if "config" not in DATA: DATA["config"] = {}
+                
                 print(f"☁️ Cloud Success! Restored {len(DATA.get('users', {}))} profiles and {len(DATA.get('global_cards', {}))} card configurations.")
                 return
         else:
             print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
     except Exception as e:
         print(f"❌ Cloud Database Connection Fault: {e}")
-
 
 def save_data():
     """Forces an absolute synchronous write commit directly to your private cloud storage endpoint."""
