@@ -1086,12 +1086,17 @@ async def on_message_edit(before, after):
                 save_data()
                 
                 # Post validation details back to the queue channel
+                               # Post validation details back to the queue channel safely
                 if awarded_mentions:
-                    await after.channel.send(
-                        f"🪙 **NeatQueue Edit Link Synced!** Match results registered.\n"
-                        f"The following winners have been credited with **{reward_amount} coins**: "
-                        f"{', '.join(awarded_mentions)}"
-                    )
+                    try:
+                        await after.channel.send(
+                            f"🪙 **NeatQueue Edit Link Synced!** Match results registered.\n"
+                            f"The following winners have been credited with **{reward_amount} coins**: "
+                            f"{', '.join(awarded_mentions)}"
+                        )
+                    except discord.errors.Forbidden:
+                        print(f"⚠️ Missing Permissions: Could not send success message in #{after.channel.name}, but coins were successfully saved to the cloud!")
+
 
 # --- Start Services ---
 keep_alive()
