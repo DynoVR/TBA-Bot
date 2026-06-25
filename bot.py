@@ -44,6 +44,7 @@ def keep_alive():
 
 
 # --- Configuration & Security ---
+# --- Configuration & Security ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
 DATABASE_FILE = "card_league_database.json"
 
@@ -59,7 +60,7 @@ RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epi
 # Global Tracker Container for Matchmaking Queues
 ACTIVE_QUEUES = {1: [], 2: [], 3: []}
 
-# --- Complete Consolidated Database System Template ---
+# --- Complete Consolidated Database System ---
 DATA = {
     "season_title": "TBA League",
     "games_count": 0,
@@ -93,7 +94,6 @@ DATA = {
     }
 }
 
-
 # ==============================================================================
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
@@ -101,10 +101,6 @@ DATA = {
 def load_data():
     global DATA
     print("🔄 Initiating master league database synchronization...")
-    
-    # Debug tracking statements to ensure your credentials are functioning
-    if not GH_TOKEN:
-        print("❌ Critical Initialization Warning: 'GH_TOKEN' environment key is missing!")
     
     if GH_TOKEN:
         try:
@@ -115,30 +111,27 @@ def load_data():
                 "User-Agent": "Discord-Bot-Data-Sync"
             }
             res = requests.get(url, headers=headers)
-            print(f"📡 GitHub API Connection Status Code: {res.status_code}")
+            print(f"📡 GitHub Cloud Pull Status Response: {res.status_code}")
             
             if res.status_code == 200:
                 file_data = res.json()
                 content = base64.b64decode(file_data["content"]).decode("utf-8")
                 loaded_json = json.loads(content)
                 
-                # Check for structural dictionary validation parameters
                 if isinstance(loaded_json, dict) and ("users" in loaded_json or "global_cards" in loaded_json):
                     DATA = loaded_json
-                    print(f"☁️ Success: Permanent database pulled! Profiles: {len(DATA.get('users', {}))}, Cards: {len(DATA.get('global_cards', {}))}")
+                    print(f"☁️ Success: Permanent database restored from GitHub Cloud! Profiles: {len(DATA.get('users', {}))}, Cards: {len(DATA.get('global_cards', {}))}")
                     
-                    # Force update your local cached directory copy
                     with open(DATABASE_FILE, "w") as f:
                         json.dump(DATA, f, indent=4)
                     return
                 else:
-                    print("⚠️ Cloud Pull Alert: Remote file data format invalid. Checking fallback arrays.")
+                    print("⚠️ Cloud Pull Alert: Format is invalid. Checking local fallback cached file.")
             else:
-                print(f"❌ Cloud Pull Bypass Error ({res.status_code}): GitHub refused access. Details: {res.text}")
+                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): Could not fetch cloud file.")
         except Exception as e:
             print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
 
-    # Local fallback loop recovery tracker
     if os.path.exists(DATABASE_FILE):
         try:
             with open(DATABASE_FILE, "r") as f:
@@ -150,7 +143,7 @@ def load_data():
         except Exception as e:
             print(f"❌ Local Read Error: {e}")
             
-    print("🚨 System Warning: No valid remote or local database detected. Preserving baseline template layer structures.")
+    print("🚨 System Warning: No valid remote or local database detected. Preserving baseline template.")
 
 
 def save_data():
@@ -195,29 +188,20 @@ def save_data():
             print("☁️ Permanent database securely backed up to GitHub Cloud successfully!")
         else:
             print(f"❌ GitHub API Sync Failed ({put_req.status_code}): {put_req.text}")
-            
     except Exception as e:
         print(f"❌ GitHub Cloud Backup Loop Crash: {e}")
 
+
 def verify_user(user_id_str, username="Unknown"):
+    if "users" not in DATA:
+        DATA["users"] = {}
     if user_id_str not in DATA["users"]:
         DATA["users"][user_id_str] = {
             "name": username, "coins": 150, "inventory": {},
             "last_weekly": None, "wins": 0, "losses": 0
         }
 
-# --- Permission Check Decorators ---
-def is_staff():
-    async def predicate(ctx):
-        if ctx.author.id == ctx.guild.owner_id:
-            return True
-        staff_role_id = DATA["config"].get("staff_role_id")
-        if staff_role_id:
-            return any(str(role.id) == str(staff_role_id) for role in ctx.author.roles)
-        return any(role.name.lower() == "staff" for role in ctx.author.roles)
-    return commands.check(predicate)
-
-# --- Bot Initialization ---
+# --- Bot Initialization Settings ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
