@@ -102,49 +102,55 @@ def load_data():
     global DATA
     print("🔄 Initiating master league database synchronization...")
     
+    # Debug tracking statements to ensure your credentials are functioning
+    if not GH_TOKEN:
+        print("❌ Critical Initialization Warning: 'GH_TOKEN' environment key is missing!")
+    
     if GH_TOKEN:
         try:
-            # FIXED LINK: Fully typed destination path to prevent connection resets
             url = "https://github.com"
-
             headers = {
-                "Authorization": f"Bearer {GH_TOKEN}", 
+                "Authorization": f"token {GH_TOKEN}", 
                 "Accept": "application/vnd.github.v3+json",
                 "User-Agent": "Discord-Bot-Data-Sync"
             }
             res = requests.get(url, headers=headers)
+            print(f"📡 GitHub API Connection Status Code: {res.status_code}")
             
             if res.status_code == 200:
                 file_data = res.json()
                 content = base64.b64decode(file_data["content"]).decode("utf-8")
                 loaded_json = json.loads(content)
                 
-                if loaded_json.get("users") or loaded_json.get("global_cards"):
+                # Check for structural dictionary validation parameters
+                if isinstance(loaded_json, dict) and ("users" in loaded_json or "global_cards" in loaded_json):
                     DATA = loaded_json
-                    print("☁️ Success: Permanent database successfully pulled and restored from GitHub Cloud!")
+                    print(f"☁️ Success: Permanent database pulled! Profiles: {len(DATA.get('users', {}))}, Cards: {len(DATA.get('global_cards', {}))}")
                     
+                    # Force update your local cached directory copy
                     with open(DATABASE_FILE, "w") as f:
                         json.dump(DATA, f, indent=4)
                     return
                 else:
-                    print("⚠️ Cloud Pull Alert: Remote file exists but appeared blank. Checking local fallback.")
+                    print("⚠️ Cloud Pull Alert: Remote file data format invalid. Checking fallback arrays.")
             else:
-                print(f"⚠️ Cloud Pull Bypass ({res.status_code}): No remote backup found or API limit hit.")
+                print(f"❌ Cloud Pull Bypass Error ({res.status_code}): GitHub refused access. Details: {res.text}")
         except Exception as e:
             print(f"❌ GitHub Critical Cloud Pull Fault: {e}")
 
+    # Local fallback loop recovery tracker
     if os.path.exists(DATABASE_FILE):
         try:
             with open(DATABASE_FILE, "r") as f:
                 local_data = json.load(f)
-                if local_data.get("users") or local_data.get("global_cards"):
+                if isinstance(local_data, dict) and ("users" in local_data or "global_cards" in local_data):
                     DATA = local_data
                     print("💾 Local cache database loaded successfully as fallback configuration.")
                     return
         except Exception as e:
             print(f"❌ Local Read Error: {e}")
             
-    print("🚨 System Warning: No valid remote or local database detected. Initializing clean template layer.")
+    print("🚨 System Warning: No valid remote or local database detected. Preserving baseline template layer structures.")
 
 
 def save_data():
@@ -161,9 +167,7 @@ def save_data():
         return
 
     try:
-        # FIXED: Direct API endpoint connection layout pathing
         url = "https://github.com"
-        
         headers = {
             "Authorization": f"token {GH_TOKEN}",
             "Accept": "application/vnd.github.v3+json",
