@@ -467,30 +467,23 @@ async def automatic_neatque_scanner():
 # --- BOT INITIALIZER AND EVENT HOOKS ---
 # ==============================================================================
 
-# ==============================================================================
-# --- BOT INITIALIZER AND EVENT HOOKS ---
-# ==============================================================================
-
 @bot.event
 async def on_ready():
     """Triggered automatically when the bot successfully authenticates with Discord Gateway."""
     print(f"🏒 Bot Online: Connected as {bot.user.name} ({bot.user.id})")
     
-    # STEP 1: Force a clean download of your remote database from GitHub Cloud first!
-    load_data()
-    
-    # STEP 2: Double-check if the cloud download succeeded before allowing loop starts
+    # Verify our data configuration parameters are fully loaded
     if not DATA.get("users") and not DATA.get("global_cards"):
-        print("⚠️ Data Alert: Master cloud data structures are completely empty. Checking local safety records...")
+        print("⚠️ Data Alert: Master database structure is completely empty.")
     else:
-        print(f"✅ Success: Data locked in! Loaded {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
+        print(f"✅ Data Active: Verified {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
 
-    # STEP 3: Start your background loop ONLY after data has been completely downloaded and set
+    # Start your background loop safely
     if not automatic_neatque_scanner.is_running():
         automatic_neatque_scanner.start()
         print("🚀 Automated NeatQueue background scanner engine started safely.")
         
-    # STEP 4: Synchronize slash commands across servers
+    # Synchronize slash commands instantly
     try:
         synced = await bot.tree.sync()
         print(f"🌲 Successfully synchronized {len(synced)} application slash commands.")
@@ -1125,7 +1118,22 @@ async def on_message_edit(before, after):
 
 
 # --- Start Services ---
+# ==============================================================================
+# --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
+# ==============================================================================
+
+# 1. Start the Flask keep-alive web server
 keep_alive()
-bot.run(TOKEN)
+
+# 2. CRITICAL SYNC: Load your database BEFORE logging into Discord
+# This prevents requests.get from freezing your live Discord gateway session
+load_data()
+
+# 3. Launch the primary bot client thread instance safely
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("❌ Critical System Initialization Fault: 'DISCORD_TOKEN' environment key is blank.")
+
 
 
