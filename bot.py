@@ -306,7 +306,7 @@ def save_data():
 def verify_user(user_id_str, username="Unknown"):
     if user_id_str not in DATA["users"]:
         DATA["users"][user_id_str] = {
-            "name": username, "coins": 100, "inventory": {},
+            "name": username, "coins": 150, "inventory": {},
             "last_weekly": None, "wins": 0, "losses": 0
         }
 
@@ -467,22 +467,48 @@ async def automatic_neatque_scanner():
 # --- BOT INITIALIZER AND EVENT HOOKS ---
 # ==============================================================================
 
+# ==============================================================================
+# --- BOT INITIALIZER AND EVENT HOOKS ---
+# ==============================================================================
+
 @bot.event
 async def on_ready():
-    load_data()
-    keep_alive()
-    print(f"🏒 Bot Online: Connected as {bot.user}")
+    """Triggered automatically when the bot successfully authenticates with Discord Gateway."""
+    print(f"🏒 Bot Online: Connected as {bot.user.name} ({bot.user.id})")
     
+    # STEP 1: Force a clean download of your remote database from GitHub Cloud first!
+    load_data()
+    
+    # STEP 2: Double-check if the cloud download succeeded before allowing loop starts
+    if not DATA.get("users") and not DATA.get("global_cards"):
+        print("⚠️ Data Alert: Master cloud data structures are completely empty. Checking local safety records...")
+    else:
+        print(f"✅ Success: Data locked in! Loaded {len(DATA['users'])} user accounts and {len(DATA['global_cards'])} custom cards.")
+
+    # STEP 3: Start your background loop ONLY after data has been completely downloaded and set
     if not automatic_neatque_scanner.is_running():
         automatic_neatque_scanner.start()
-        print("🚀 Automated Background Match Scanner Started (30s Interval Loop Active).")
+        print("🚀 Automated NeatQueue background scanner engine started safely.")
         
+    # STEP 4: Synchronize slash commands across servers
     try:
-        await bot.tree.sync()
-        print("🔄 Slash commands linked.")
+        synced = await bot.tree.sync()
+        print(f"🌲 Successfully synchronized {len(synced)} application slash commands.")
     except Exception as e:
-        print(f"Sync Error: {e}")
+        print(f"❌ Application Command Tree Sync Fault: {e}")
 
+# ==============================================================================
+# --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
+# ==============================================================================
+
+# Launch the local Flask server to keep Render web health checks green
+keep_alive()
+
+# Launch the primary bot client thread instance safely
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("❌ Critical System Initialization Fault: 'DISCORD_TOKEN' environment key is blank.")
 
 @bot.command(name="forcesync")
 async def forcesync(ctx):
@@ -784,7 +810,7 @@ async def buypack(ctx, pack_size: int):
     u_id = str(ctx.author.id)
     verify_user(u_id, ctx.author.display_name)
     
-    cost = DATA["config"].get(f"pack_{pack_size}_price", 100)
+    cost = DATA["config"].get(f"pack_{pack_size}_price", 150)
     if DATA["users"][u_id]["coins"] < cost:
         return await ctx.send(f"❌ Low Balance: Pack requires {cost} coins. Balance: {DATA['users'][u_id]['coins']}")
         
