@@ -83,14 +83,14 @@ DATA = {
         "queue_role_id": None,
         "match_role_id": None,
         "sell_prices": {
-            "Average": 10,
-            "Great": 20,
-            "Epic": 40,
-            "Insane": 75,
-            "Pro": 150,
-            "Juggernaut": 300,
-            "Otherworldly": 750,
-            "Specialty": 1000
+            "Average": 1,
+            "Great": 2,
+            "Epic": 5,
+            "Insane": 10,
+            "Pro": 25,
+            "Juggernaut": 100,
+            "Otherworldly": 300,
+            "Specialty": 750
         }
     }
 }
@@ -695,10 +695,10 @@ def draw_random_cards(count: int) -> list:
         "Great": 25.0, 
         "Epic": 15.0, 
         "Insane": 8.0, 
-        "Pro": 4.0, 
-        "Juggernaut": 2.0, 
-        "Otherworldly": 0.8, 
-        "Specialty": 0.2
+        "Pro": 3.0, 
+        "Juggernaut": 1.0, 
+        "Otherworldly": 0.3, 
+        "Specialty": 0.1
     }
     
     drawn = []
