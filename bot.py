@@ -96,11 +96,15 @@ def load_data():
     global DATA
     print("🔄 Connecting to External Cloud Database Service...")
     
-    db_url = os.environ.get("DB_URL")
-    db_key = os.environ.get("DB_KEY")
+    # Clean up variables to remove accidental hidden spaces or ghost characters
+    raw_url = os.environ.get("DB_URL", "")
+    raw_key = os.environ.get("DB_KEY", "")
     
-    if not db_url or not db_key:
-        print("🚨 System Warning: Cloud Database 'DB_URL' or 'DB_KEY' missing in Render Environment dashboard!")
+    db_url = str(raw_url).strip().replace('"', '').replace("'", "")
+    db_key = str(raw_key).strip().replace('"', '').replace("'", "")
+    
+    if not db_url or not db_key or "jsonbin" not in db_url:
+        print("🚨 System Warning: 'DB_URL' or 'DB_KEY' environment values are blank or invalid inside Render! Bypassing cloud pull.")
         return
 
     try:
@@ -108,15 +112,14 @@ def load_data():
             "X-Master-Key": db_key,
             "X-Bin-Meta": "false"
         }
-        print("📡 Sending secure payload request to cloud server...")
+        print(f"📡 Dispatching link handshake: {db_url[:30]}...")
         
-        # FIXED: Added a strict 5-second timeout constraint to prevent thread-locking freezes
-        res = requests.get(db_url, headers=headers, timeout=5)
+        # Hardened strict 3-second timeout constraint with stream closing
+        res = requests.get(db_url, headers=headers, timeout=3.0)
         print(f"📡 Cloud Database Fetch Status Response Code: {res.status_code}")
         
         if res.status_code == 200:
             raw_json = res.json()
-            
             if isinstance(raw_json, dict) and "record" in raw_json:
                 loaded_json = raw_json["record"]
             else:
@@ -124,20 +127,27 @@ def load_data():
                 
             if isinstance(loaded_json, dict):
                 DATA = loaded_json
-                
                 if "global_cards" not in DATA: DATA["global_cards"] = {}
                 if "users" not in DATA: DATA["users"] = {}
                 if "processed_neatque_matches" not in DATA: DATA["processed_neatque_matches"] = []
                 if "config" not in DATA: DATA["config"] = {}
-                
-                print(f"☁️ Cloud Success! Restored {len(DATA.get('users', {}))} profiles and {len(DATA.get('global_cards', {}))} card configurations.")
+                print(f"☁️ Cloud Success! Restored {len(DATA.get('users', {}))} profiles.")
                 return
         else:
-            print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
-    except requests.exceptions.Timeout:
-        print("❌ CRITICAL: The connection to jsonbin.io timed out after 5 seconds! Check your link spelling or Render outbound traffic controls.")
+            print(f"❌ Cloud Pull Refused: Status {res.status_code}.")
     except Exception as e:
-        print(f"❌ CRITICAL CONNECTION CRASH INSIDE LOAD_DATA: {e}")
+        print(f"⚠️ Cloud Connection Bypass: {e}")
+        
+    # LOCAL SAFETY NET FALLBACK
+    if os.path.exists(DATABASE_FILE):
+        try:
+            with open(DATABASE_FILE, "r") as f:
+                local_data = json.load(f)
+                if isinstance(local_data, dict):
+                    DATA = local_data
+                    print("💾 Local database file loaded successfully as safety fallback.")
+        except Exception as err:
+            print(f"❌ Safety net read error: {err}")
 
 def save_data():
     """Forces an absolute synchronous write commit directly to your private cloud storage endpoint."""
