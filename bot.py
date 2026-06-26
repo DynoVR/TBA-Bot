@@ -912,9 +912,10 @@ async def catalog(ctx):
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
+    # FIXED: x[1] correctly grabs the inner dictionary data so it can read keys like 'rarity' and 'overall' safely
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
-        key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"])
+        key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"])
     )
     
     view = CatalogPaginationView(sorted_cards)
