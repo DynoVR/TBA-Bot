@@ -93,20 +93,24 @@ bot.remove_command("help")
 # ==============================================================================
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
+
 def load_data():
     global DATA
     print("🔄 Connecting to External Cloud Database Service...")
     
-    if not DB_URL or not DB_KEY:
+    db_url = os.environ.get("DB_URL")
+    db_key = os.environ.get("DB_KEY")
+    
+    if not db_url or not db_key:
         print("🚨 System Warning: Cloud Database 'DB_URL' or 'DB_KEY' missing in Render Environment dashboard!")
         return
 
     try:
         headers = {
-            "X-Master-Key": DB_KEY,
+            "X-Master-Key": db_key,
             "X-Bin-Meta": "false"
         }
-        res = requests.get(DB_URL, headers=headers)
+        res = requests.get(db_url, headers=headers)
         print(f"📡 Cloud Database Fetch Status Response Code: {res.status_code}")
         
         if res.status_code == 200:
@@ -114,7 +118,6 @@ def load_data():
             if isinstance(loaded_json, dict):
                 DATA = loaded_json
                 
-                # AUTOMATED RECOVERY: Ensure critical base dictionary layers exist
                 if "global_cards" not in DATA: DATA["global_cards"] = {}
                 if "users" not in DATA: DATA["users"] = {}
                 if "processed_neatque_matches" not in DATA: DATA["processed_neatque_matches"] = []
@@ -125,7 +128,8 @@ def load_data():
         else:
             print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
     except Exception as e:
-        print(f"❌ Cloud Database Connection Fault: {e}")
+        # FORCED ERROR TRACKING: This will force the hidden crash reasons to print out
+        print(f"❌ CRITICAL CONNECTION CRASH INSIDE LOAD_DATA: {e}")
 
 def save_data():
     """Forces an absolute synchronous write commit directly to your private cloud storage endpoint."""
