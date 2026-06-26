@@ -1004,94 +1004,178 @@ async def inventory(ctx, player: discord.Member = None):
     await ctx.send(embed=view.make_card_embed(), view=view)
 
 # ==============================================================================
-# --- UPGRADED MULTI-CARD INTERACTION TRADING MODULES ---
+# --- ADVANCED INTERACTIVE MULTI-CARD SELECTION TRADING GRID ---
 # ==============================================================================
 
-# ==============================================================================
-# --- FINAL MULTI-CARD INTERACTION TRADING ENGINE ---
-# ==============================================================================
+class SenderCardSelect(discord.ui.Select):
+    """Dropdown menu listing the sender's cards to add to the offer."""
+    def __init__(self, sender_id, valid_cards):
+        options = []
+        for cid, card, count in valid_cards[:25]:  # Discord caps selection options at 25 items max
+            options.append(discord.SelectOption(
+                label=f"{card['name']} ({card['overall']} OVR)",
+                description=f"Rarity: {card['rarity']} | Owned: x{count} | ID: {cid}",
+                value=cid,
+                emoji="📤"
+            ))
+        super().__init__(placeholder="➕ Select cards from YOUR vault to OFFER...", min_values=1, max_values=min(5, len(options) if options else 1), options=options if options else [discord.SelectOption(label="No cards available", value="none")])
 
-class TradeView(discord.ui.View):
-    def __init__(self, sender, receiver, s_cards_list, r_cards_list):
-        super().__init__(timeout=120)
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.view.sender.id:
+            return await interaction.response.send_message("❌ You are not the initiator of this trade offer.", ephemeral=True)
+        if "none" in self.values:
+            return await interaction.response.defer()
+            
+        self.view.s_offered_cards = self.values
+        await self.view.update_trade_display(interaction)
+
+
+class ReceiverCardSelect(discord.ui.Select):
+    """Dropdown menu listing the receiver's cards to request."""
+    def __init__(self, receiver_id, valid_cards):
+        options = []
+        for cid, card, count in valid_cards[:25]:
+            options.append(discord.SelectOption(
+                label=f"{card['name']} ({card['overall']} OVR)",
+                description=f"Rarity: {card['rarity']} | Owned: x{count} | ID: {cid}",
+                value=cid,
+                emoji="📥"
+            ))
+        super().__init__(placeholder="➕ Select cards from THEIR vault to REQUEST...", min_values=1, max_values=min(5, len(options) if options else 1), options=options if options else [discord.SelectOption(label="No cards available", value="none")])
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.view.sender.id:
+            return await interaction.response.send_message("❌ You are not the initiator of this trade offer.", ephemeral=True)
+        if "none" in self.values:
+            return await interaction.response.defer()
+            
+        self.view.r_requested_cards = self.values
+        await self.view.update_trade_display(interaction)
+
+
+class AdvancedTradeView(discord.ui.View):
+    def __init__(self, sender, receiver, sender_cards, receiver_cards):
+        super().__init__(timeout=180.0)
         self.sender = sender
         self.receiver = receiver
-        self.s_cards = s_cards_list  
-        self.r_cards = r_cards_list  
+        self.s_offered_cards = []   # Keeps track of clicked cards to swap
+        self.r_requested_cards = [] # Keeps track of clicked cards to request
+        
+        # Add the two dynamic dropdown inventory loaders into separate interaction rows
+        self.add_item(SenderCardSelect(sender.id, sender_cards))
+        self.add_item(ReceiverCardSelect(receiver.id, receiver_cards))
 
-    @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success)
+    def build_trade_embed(self):
+        embed = discord.Embed(
+            title="🤝 Interactive Multi-Card League Trade Dashboard",
+            description=f"**Proposer:** {self.sender.mention}\n**Target Party:** {self.receiver.mention}\n\n*Use the dropdown menus below to select your items. You can choose multiple entries at once.*",
+            color=0x3498db
+        )
+        
+        # Generate the text list for the Sender's side of the box
+        if self.s_offered_cards:
+            s_lines = []
+            for cid in self.s_offered_cards:
+                c = DATA["global_cards"][cid]
+                s_lines.append(f"• **[{c['rarity']}]** {c['name']} ({c['overall']} OVR)")
+            s_text = "\n".join(s_lines)
+        else:
+            s_text = "*No cards selected yet.*"
+            
+        # Generate the text list for the Receiver's side of the box
+        if self.r_requested_cards:
+            r_lines = []
+            for cid in self.r_requested_cards:
+                c = DATA["global_cards"][cid]
+                r_lines.append(f"• **[{c['rarity']}]** {c['name']} ({c['overall']} OVR)")
+            r_text = "\n".join(r_lines)
+        else:
+            r_text = "*No cards selected yet.*"
+            
+        embed.add_field(name=f"📤 {self.sender.display_name} is Offering:", value=s_text, inline=False)
+        embed.add_field(name=f"📥 Requested From {self.receiver.display_name}:", value=r_text, inline=False)
+        embed.set_footer(text="Only the sender can alter the menu selections. Target party clicks Accept to execute.")
+        return embed
+
+    async def update_trade_display(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=self.build_trade_embed(), view=self)
+
+    @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success, row=2)
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.receiver.id: 
-            return await interaction.response.send_message("❌ Target party authorization bind error.", ephemeral=True)
+        if interaction.user.id != self.receiver.id:
+            return await interaction.response.send_message("❌ Authorization Failure: Only the target player can accept this swap.", ephemeral=True)
+            
+        if not self.s_offered_cards and not self.r_requested_cards:
+            return await interaction.response.send_message("❌ Transaction Denied: Cannot execute an empty trade offer.", ephemeral=True)
             
         s_id, r_id = str(self.sender.id), str(self.receiver.id)
         s_inv = DATA["users"][s_id]["inventory"]
         r_inv = DATA["users"][r_id]["inventory"]
         
-        for c_id in self.s_cards:
-            if s_inv.get(c_id, 0) < self.s_cards.count(c_id):
-                return await interaction.response.send_message(f"❌ **Trade Aborted:** {self.sender.display_name} no longer owns enough copies of `{c_id}`.", ephemeral=True)
-        for c_id in self.r_cards:
-            if r_inv.get(c_id, 0) < self.r_cards.count(c_id):
-                return await interaction.response.send_message(f"❌ **Trade Aborted:** You no longer own enough copies of `{c_id}`.", ephemeral=True)
+        # FINAL SECURITY CHECK: Ensure items haven't been sold mid-trade
+        for cid in self.s_offered_cards:
+            if s_inv.get(cid, 0) < self.s_offered_cards.count(cid):
+                return await interaction.response.send_message(f"❌ **Trade Aborted:** {self.sender.display_name} no longer owns enough copies of `{cid}`.", ephemeral=True)
+        for cid in self.r_requested_cards:
+            if r_inv.get(cid, 0) < self.r_requested_cards.count(cid):
+                return await interaction.response.send_message(f"❌ **Trade Aborted:** You no longer own enough copies of `{cid}`.", ephemeral=True)
                 
-        for c_id in self.s_cards: s_inv[c_id] -= 1
-        for c_id in self.r_cards: r_inv[c_id] -= 1
+        # Deduct items from inventories
+        for cid in self.s_offered_cards: s_inv[cid] -= 1
+        for cid in self.r_requested_cards: r_inv[cid] -= 1
         
-        for c_id in self.s_cards: r_inv[c_id] = r_inv.get(c_id, 0) + 1
-        for c_id in self.r_cards: s_inv[c_id] = s_inv.get(c_id, 0) + 1
+        # Add items to new owners
+        for cid in self.s_offered_cards: r_inv[cid] = r_inv.get(cid, 0) + 1
+        for cid in self.r_requested_cards: s_inv[cid] = s_inv.get(cid, 0) + 1
         
         save_data()
         self.stop()
-        await interaction.response.edit_message(content=f"✅ **Multi-Trade Executed!** Transaction settled between {self.sender.mention} and {self.receiver.mention}.", view=None)
+        
+        success_embed = discord.Embed(title="✅ Transaction Settled!", color=discord.Color.green())
+        success_embed.description = f"The bulk multi-card deal between {self.sender.mention} and {self.receiver.mention} has been fully settled and backed up to cloud memory records!"
+        await interaction.response.edit_message(embed=success_embed, view=None)
 
-    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Decline Offer", style=discord.ButtonStyle.danger, row=2)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id not in (self.sender.id, self.receiver.id): 
-            return await interaction.response.send_message("❌ Access Restricted: You are not a participant in this transaction loop.", ephemeral=True)
+        if interaction.user.id not in (self.sender.id, self.receiver.id):
+            return await interaction.response.send_message("❌ Access Denied: You are not a participant in this deal.", ephemeral=True)
             
         self.stop()
-        await interaction.response.edit_message(content="🛑 Trade Cancelled. Offer was declined.", view=None)
+        await interaction.response.edit_message(content="🛑 **Trade Cancelled.** The proposal has been declined and dissolved.", embed=None, view=None)
 
 
-@bot.hybrid_command(name="trade", description="Trade multiple cards at once using commas")
-@app_commands.describe(target_player="Player to swap with", your_card_ids="Card IDs you give (id1, id2)", their_card_ids="Card IDs you want (id1, id2)")
-async def trade(ctx, target_player: discord.Member, your_card_ids: str, their_card_ids: str):
-    if target_player == ctx.author: 
+@bot.hybrid_command(name="trade", description="Public Command: Open the visual multi-card trading dashboard menu")
+@app_commands.describe(target_player="The user you want to swap items with")
+async def trade(ctx, target_player: discord.Member):
+    if target_player == ctx.author:
         return await ctx.send("❌ Self-trading is blocked.")
         
     s_id, r_id = str(ctx.author.id), str(target_player.id)
     verify_user(s_id, ctx.author.display_name)
     verify_user(r_id, target_player.display_name)
     
-    s_cards = [cid.strip() for cid in your_card_ids.split(",") if cid.strip()]
-    r_cards = [cid.strip() for cid in their_card_ids.split(",") if cid.strip()]
-    
-    if not s_cards or not r_cards:
-        return await ctx.send("❌ **Input Error:** You must provide at least one card ID for each side.")
-
-    for c_id in s_cards:
-        if c_id not in DATA["global_cards"]:
-            return await ctx.send(f"❌ **Error:** Card ID `{c_id}` does not exist in the master catalog.")
-        if DATA["users"][s_id]["inventory"].get(c_id, 0) < s_cards.count(c_id):
-            return await ctx.send(f"❌ **Error:** You do not own enough copies of `{c_id}` to complete this trade.")
+    # Extract sender inventory cards list matrix records
+    s_valid_cards = []
+    for cid, count in DATA["users"][s_id].get("inventory", {}).items():
+        if count > 0 and cid in DATA["global_cards"]:
+            s_valid_cards.append((cid, DATA["global_cards"][cid], count))
             
-    for c_id in r_cards:
-        if c_id not in DATA["global_cards"]:
-            return await ctx.send(f"❌ **Error:** Card ID `{c_id}` does not exist in the master catalog.")
-        if DATA["users"][r_id]["inventory"].get(c_id, 0) < r_cards.count(c_id):
-            return await ctx.send(f"❌ **Error:** {target_player.display_name} does not own enough copies of `{c_id}`.")
-
-    sender_offer = "\n".join([f"• **[{DATA['global_cards'][cid]['rarity']}]** {DATA['global_cards'][cid]['name']} (`{cid}`)" for cid in s_cards])
-    receiver_offer = "\n".join([f"• **[{DATA['global_cards'][cid]['rarity']}]** {DATA['global_cards'][cid]['name']} (`{cid}`)" for cid in r_cards])
+    # Extract receiver inventory cards list matrix records
+    r_valid_cards = []
+    for cid, count in DATA["users"][r_id].get("inventory", {}).items():
+        if count > 0 and cid in DATA["global_cards"]:
+            r_valid_cards.append((cid, DATA["global_cards"][cid], count))
+            
+    # Enforce basic inventory checks to avoid opening empty screens
+    if not s_valid_cards and not r_valid_cards:
+        return await ctx.send("🎒 **Vault Alert:** Neither player owns card assets ready for trading lanes.")
+        
+    # Sort options by rarity mapping priority metrics so they look neat in lists
+    s_valid_cards.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
+    r_valid_cards.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
     
-    embed = discord.Embed(title="🤝 Incoming Multi-Card Trade Proposal", color=0x3498db)
-    embed.add_field(name=f"📤 {ctx.author.display_name} Offers:", value=sender_offer, inline=False)
-    embed.add_field(name=f"📥 Requested From {target_player.display_name}:", value=receiver_offer, inline=False)
-    embed.set_footer(text="This pending proposal window expires in 120 seconds.")
-    
-    view = TradeView(ctx.author, target_player, s_cards, r_cards)
-    await ctx.send(f"🤝 {target_player.mention}, you received a trade offer from {ctx.author.mention}!", embed=embed, view=view)
+    view = AdvancedTradeView(ctx.author, target_player, s_valid_cards, r_valid_cards)
+    await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} opened an interactive trade desk with you!", embed=view.build_trade_embed(), view=view)
 
 # ==============================================================================
 # --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
