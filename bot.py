@@ -809,6 +809,10 @@ def get_ansi_card_line(card_name, rarity, overall, card_id, count=None):
 # --- INTERACTIVE PAGINATED DECK BUTTON MODULES ---
 # ==============================================================================
 
+# ==============================================================================
+# --- UPGRADED INTERACTIVE DECK BUTTONS WITH JUMP DROPDOWNS ---
+# ==============================================================================
+
 def get_rarity_emoji(rarity):
     emoji_map = {
         "Average": "🟦", "Great": "🟪", "Epic": "🟩", "Insane": "🔮",
@@ -817,13 +821,34 @@ def get_rarity_emoji(rarity):
     return emoji_map.get(rarity, "🎴")
 
 
+class CatalogJumpSelect(discord.ui.Select):
+    """Dropdown menu mapping milestones to warp across the master catalog."""
+    def __init__(self, total_cards):
+        options = []
+        # Create jump intervals (every 5 cards, plus the first and final frames)
+        for i in range(0, total_cards, 5):
+            options.append(discord.SelectOption(label=f"Jump to Card #{i+1}", value=str(i), emoji="📖"))
+        if str(total_cards - 1) not in [o.value for o in options] and total_cards > 1:
+            options.append(discord.SelectOption(label=f"Jump to Final Card (#{total_cards})", value=str(total_cards - 1), emoji="🏁"))
+        
+        # Keep options array capped at Discord's 25 max selection limit boundary constraints
+        super().__init__(placeholder="Select a card number to warp to...", min_values=1, max_values=1, options=options[:25])
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.current_index = int(self.values[0])
+        await interaction.response.edit_message(embed=self.view.make_card_embed(), view=self.view)
+
+
 class CatalogPaginationView(discord.ui.View):
-    """Interactive Button Grid Engine for scrolling through the card catalog."""
+    """Interactive Button Grid Engine for scrolling through the card catalog with jump slots."""
     def __init__(self, sorted_cards):
         super().__init__(timeout=90.0)
         self.sorted_cards = sorted_cards
         self.current_index = 0
         self.max_index = len(sorted_cards) - 1
+        # Dynamically inject the dropdown selector frame layout row below the navigation links
+        if len(sorted_cards) > 1:
+            self.add_item(CatalogJumpSelect(len(sorted_cards)))
 
     def make_card_embed(self):
         card_id, c = self.sorted_cards[self.current_index]
@@ -836,27 +861,43 @@ class CatalogPaginationView(discord.ui.View):
         )
         embed.add_field(name="📈 Attributes", value=f"```\nOVERALL: {c['overall']} OVR\nRARITY:  {c['rarity']}\n```", inline=True)
         embed.add_field(name="🆔 Card Serial", value=f"```\nID: {card_id}\n```", inline=True)
-        embed.set_footer(text=f"Card {self.current_index + 1} of {len(self.sorted_cards)} | Click arrows to scroll blueprints")
+        embed.set_footer(text=f"Card {self.current_index + 1} of {len(self.sorted_cards)} | Scroll or use the menu to jump pages")
         
         if c.get("image_url"):
             embed.set_thumbnail(url=c["image_url"])
         return embed
 
-    @discord.ui.button(label="◀ Prev Card", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="◀ Prev Card", style=discord.ButtonStyle.secondary, row=0)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_index > 0:
             self.current_index -= 1
         else:
-            self.current_index = self.max_index # Loop back to the end
+            self.current_index = self.max_index
         await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
 
-    @discord.ui.button(label="Next Card ▶", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Next Card ▶", style=discord.ButtonStyle.primary, row=0)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_index < self.max_index:
             self.current_index += 1
         else:
-            self.current_index = 0 # Loop back to the beginning
+            self.current_index = 0
         await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
+
+
+class InventoryJumpSelect(discord.ui.Select):
+    """Dropdown menu mapping milestones to warp across player storage vaults."""
+    def __init__(self, total_items):
+        options = []
+        for i in range(0, total_items, 5):
+            options.append(discord.SelectOption(label=f"Warp to Item #{i+1}", value=str(i), emoji="🎒"))
+        if str(total_items - 1) not in [o.value for o in options] and total_items > 1:
+            options.append(discord.SelectOption(label=f"Warp to Final Item (#{total_items})", value=str(total_items - 1), emoji="🏁"))
+            
+        super().__init__(placeholder="Select an item index card to warp to...", min_values=1, max_values=1, options=options[:25])
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.current_index = int(self.values[0])
+        await interaction.response.edit_message(embed=self.view.make_card_embed(), view=self.view)
 
 
 class InventoryPaginationView(discord.ui.View):
@@ -869,6 +910,8 @@ class InventoryPaginationView(discord.ui.View):
         self.total_coins = total_coins
         self.current_index = 0
         self.max_index = len(sorted_inv) - 1
+        if len(sorted_inv) > 1:
+            self.add_item(InventoryJumpSelect(len(sorted_inv)))
 
     def make_card_embed(self):
         c_id = self.sorted_inv[self.current_index]
@@ -884,13 +927,13 @@ class InventoryPaginationView(discord.ui.View):
         )
         embed.add_field(name=f"{r_emoji} {card_data['name'].upper()}", value=f"```\nOVERALL: {card_data['overall']} OVR\nRARITY:  {card_data['rarity']}\n```", inline=False)
         embed.add_field(name="📦 Possession Details", value=f"```\nOWNED COPIES: x{owned_count}\nCARD ID:      {c_id}\n```", inline=False)
-        embed.set_footer(text=f"Owned Item {self.current_index + 1} of {len(self.sorted_inv)} | Click arrows to inspect deck")
+        embed.set_footer(text=f"Owned Item {self.current_index + 1} of {len(self.sorted_inv)} | Use buttons or select a page target")
         
         if card_data.get("image_url"):
             embed.set_thumbnail(url=card_data["image_url"])
         return embed
 
-    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary, row=0)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_index > 0:
             self.current_index -= 1
@@ -898,7 +941,7 @@ class InventoryPaginationView(discord.ui.View):
             self.current_index = self.max_index
         await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
 
-    @discord.ui.button(label="Next Item ▶", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Next Item ▶", style=discord.ButtonStyle.success, row=0)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_index < self.max_index:
             self.current_index += 1
@@ -907,12 +950,12 @@ class InventoryPaginationView(discord.ui.View):
         await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
 
 
-@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix using click buttons")
+@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix using click buttons and jump slots")
 async def catalog(ctx):
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
-    # FIXED: x[1] correctly grabs the inner dictionary data so it can read keys like 'rarity' and 'overall' safely
+    # FIXED SORT LAYOUT MATRIX ROUTE PATHING
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
         key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"])
@@ -922,7 +965,7 @@ async def catalog(ctx):
     await ctx.send(embed=view.make_card_embed(), view=view)
 
 
-@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage via interactive buttons")
+@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage via buttons and jump slots")
 async def inventory(ctx, player: discord.Member = None):
     t = player or ctx.author
     t_id = str(t.id)
@@ -942,6 +985,7 @@ async def inventory(ctx, player: discord.Member = None):
     total_coins = DATA["users"][t_id]["coins"]
     view = InventoryPaginationView(t.display_name, sorted_inv, inv, total_coins)
     await ctx.send(embed=view.make_card_embed(), view=view)
+
 
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
