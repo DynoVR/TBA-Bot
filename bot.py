@@ -408,9 +408,9 @@ async def setmatchreward(ctx, amount: int):
 @bot.hybrid_command(name="help", description="Public Command: Display full blueprint command reference deck index manual")
 async def help_command(ctx):
     embed = discord.Embed(title="🏒 League System Command Directory", color=discord.Color.blue())
-    embed.add_field(name="🌐 Public Card Commands", value="`/log [page]` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_id> <their_card_id>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
+    embed.add_field(name="🌐 Public Card Commands", value="`/catalog` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_ids> <their_card_ids>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
     embed.add_field(name="⚔️ Matchmaking Commands", value="`/setupqueue <size>` - Deploy interactive match waiting panel\n`Buttons` - Join/Leave queue pool interface nodes", inline=False)
-    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/ <player> <rarity> <overall> [image_url]` - Initialize new custom card ID profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <give/take> <player> <amount>` - Change balance values safely\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
+    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <rarity> <overall> [player] [specialty_title] [image_url]` - Initialize new card profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <action> <player> <amount>` - Change balance values safely\n`/setpackprice <size> <new_price>` - Configure the purchase price of card packs\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
     await ctx.send(embed=embed)
 
 # ==============================================================================
@@ -1071,12 +1071,31 @@ async def trade(ctx, target_player: discord.Member, your_card_ids: str, their_ca
 # --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
 # ==============================================================================
 
-@bot.hybrid_command(name="editmatchreward", description="Staff Command: Calibrate the global currency payout size awarded to winning teams")
+@bot.hybrid_command(name="setpackprice", description="Staff Command: Configure the purchase price of card packs")
 @is_staff()
-async def editmatchreward(ctx, new_reward: int):
-    DATA["config"]["match_reward"] = max(0, new_reward)
+@app_commands.choices(size=[
+    app_commands.Choice(name="3 Players Pack", value=3),
+    app_commands.Choice(name="5 Players Pack", value=5),
+    app_commands.Choice(name="10 Players Pack", value=10)
+])
+async def setpackprice(ctx, size: int, new_price: int):
+    if new_price < 0:
+        return await ctx.send("❌ **Input Error:** Pack prices cannot be negative.")
+        
+    # Inject the keys into memory if JSONBin initialized them as empty
+    if "config" not in DATA: 
+        DATA["config"] = {}
+    
+    # Update the price in the script's memory
+    DATA["config"][f"pack_{size}_price"] = new_price
+    
+    # FORCE write it directly into your JSONBin cloud storage right now
     save_data()
-    await ctx.send(f"🪙 **Match Payout Settings Saved!** Future match series victories will award `{new_reward}` coins per player.")
+    
+    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
+    embed.description = f"Successfully set the price of the **{size} Player Pack** to `{new_price}` coins 🪙."
+    await ctx.send(embed=embed)
+
 
 # ==============================================================================
 # --- FINAL UNIVERSAL NEATQUEUE MULTI-LAYER SCRAPER ENGINE ---
