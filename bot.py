@@ -1028,8 +1028,8 @@ class TradeView(discord.ui.View):
         await interaction.response.edit_message(content="🛑 Trade Cancelled. Offer was declined.", view=None)
 
 
-@bot.hybrid_command(name="trade", description="Public Command: Swap multiple cards at once using comma-separated lists")
-@app_commands.describe(target_player="The user you want to swap items with", your_card_ids="Comma-separated card IDs you offer", their_card_ids="Comma-separated card IDs you request")
+@bot.hybrid_command(name="trade", description="Trade multiple cards at once using commas")
+@app_commands.describe(target_player="Player to swap with", your_card_ids="Card IDs you give (id1, id2)", their_card_ids="Card IDs you want (id1, id2)")
 async def trade(ctx, target_player: discord.Member, your_card_ids: str, their_card_ids: str):
     if target_player == ctx.author: 
         return await ctx.send("❌ Self-trading is blocked.")
