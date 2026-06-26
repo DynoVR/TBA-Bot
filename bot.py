@@ -46,6 +46,20 @@ DB_KEY = os.environ.get("DB_KEY")
 # --- Sorted Card Ledger Constants ---
 RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
 ACTIVE_QUEUES = {1: [], 2: [], 3: []}
+# Ordered priority mapping for sorted card ledger structures
+RARITY_ORDER = ["Specialty", "Otherworldly", "Juggernaut", "Pro", "Insane", "Epic", "Great", "Average"]
+
+# --- NEW: CUSTOM CARD RARITY EMBED COLOR CODES ---
+RARITY_COLORS = {
+    "Average": 0xADD8E6,       # Light Blue
+    "Great": 0x800080,         # Purple
+    "Epic": 0x50C878,          # Emerald Green
+    "Insane": 0x7851A9,        # Royal Purple
+    "Pro": 0xFFD700,           # Gold
+    "Juggernaut": 0xCD7F32,    # Orange Bronze
+    "Otherworldly": 0x8B0000,  # Dark Red
+    "Specialty": 0xFFFFFF      # Pure White (Fallback)
+}
 
 # --- Baseline Database Template Layer ---
 DATA = {
