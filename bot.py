@@ -1177,35 +1177,6 @@ async def trade(ctx, target_player: discord.Member):
     view = AdvancedTradeView(ctx.author, target_player, s_valid_cards, r_valid_cards)
     await ctx.send(f"🤝 {target_player.mention}, {ctx.author.mention} opened an interactive trade desk with you!", embed=view.build_trade_embed(), view=view)
 
-# ==============================================================================
-# --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
-# ==============================================================================
-
-@bot.hybrid_command(name="setpackprice", description="Staff Command: Configure the purchase price of card packs")
-@is_staff()
-@app_commands.choices(size=[
-    app_commands.Choice(name="3 Players Pack", value=3),
-    app_commands.Choice(name="5 Players Pack", value=5),
-    app_commands.Choice(name="10 Players Pack", value=10)
-])
-async def setpackprice(ctx, size: int, new_price: int):
-    if new_price < 0:
-        return await ctx.send("❌ **Input Error:** Pack prices cannot be negative.")
-        
-    # Inject the keys into memory if JSONBin initialized them as empty
-    if "config" not in DATA: 
-        DATA["config"] = {}
-    
-    # Update the price in the script's memory
-    DATA["config"][f"pack_{size}_price"] = new_price
-    
-    # FORCE write it directly into your JSONBin cloud storage right now
-    save_data()
-    
-    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
-    embed.description = f"Successfully set the price of the **{size} Player Pack** to `{new_price}` coins 🪙."
-    await ctx.send(embed=embed)
-
 
 # ==============================================================================
 # --- FINAL UNIVERSAL NEATQUEUE MULTI-LAYER SCRAPER ENGINE ---
