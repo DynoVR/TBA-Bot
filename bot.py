@@ -805,6 +805,10 @@ def get_ansi_card_line(card_name, rarity, overall, card_id, count=None):
 # --- UPGRADED COLLECTIBLE FRAME CARD VAULT MODULES ---
 # ==============================================================================
 
+# ==============================================================================
+# --- INTERACTIVE PAGINATED DECK BUTTON MODULES ---
+# ==============================================================================
+
 def get_rarity_emoji(rarity):
     emoji_map = {
         "Average": "🟦", "Great": "🟪", "Epic": "🟩", "Insane": "🔮",
@@ -813,47 +817,111 @@ def get_rarity_emoji(rarity):
     return emoji_map.get(rarity, "🎴")
 
 
-@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix")
-async def catalog(ctx, page: int = 1):
+class CatalogPaginationView(discord.ui.View):
+    """Interactive Button Grid Engine for scrolling through the card catalog."""
+    def __init__(self, sorted_cards):
+        super().__init__(timeout=90.0)
+        self.sorted_cards = sorted_cards
+        self.current_index = 0
+        self.max_index = len(sorted_cards) - 1
+
+    def make_card_embed(self):
+        card_id, c = self.sorted_cards[self.current_index]
+        r_color = RARITY_COLORS.get(c['rarity'], 0x3498db)
+        r_emoji = get_rarity_emoji(c['rarity'])
+        
+        embed = discord.Embed(
+            title=f"{r_emoji} {c['name'].upper()} (CATALOG INDEX)", 
+            color=r_color
+        )
+        embed.add_field(name="📈 Attributes", value=f"```\nOVERALL: {c['overall']} OVR\nRARITY:  {c['rarity']}\n```", inline=True)
+        embed.add_field(name="🆔 Card Serial", value=f"```\nID: {card_id}\n```", inline=True)
+        embed.set_footer(text=f"Card {self.current_index + 1} of {len(self.sorted_cards)} | Click arrows to scroll blueprints")
+        
+        if c.get("image_url"):
+            embed.set_thumbnail(url=c["image_url"])
+        return embed
+
+    @discord.ui.button(label="◀ Prev Card", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_index > 0:
+            self.current_index -= 1
+        else:
+            self.current_index = self.max_index # Loop back to the end
+        await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
+
+    @discord.ui.button(label="Next Card ▶", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_index < self.max_index:
+            self.current_index += 1
+        else:
+            self.current_index = 0 # Loop back to the beginning
+        await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
+
+
+class InventoryPaginationView(discord.ui.View):
+    """Interactive Button Grid Engine for scrolling through a player's private inventory vault."""
+    def __init__(self, target_name, sorted_inv, inv_data, total_coins):
+        super().__init__(timeout=90.0)
+        self.target_name = target_name
+        self.sorted_inv = sorted_inv
+        self.inv_data = inv_data
+        self.total_coins = total_coins
+        self.current_index = 0
+        self.max_index = len(sorted_inv) - 1
+
+    def make_card_embed(self):
+        c_id = self.sorted_inv[self.current_index]
+        card_data = DATA["global_cards"][c_id]
+        r_color = RARITY_COLORS.get(card_data['rarity'], 0x3498db)
+        r_emoji = get_rarity_emoji(card_data['rarity'])
+        owned_count = self.inv_data[c_id]
+        
+        embed = discord.Embed(
+            title=f"🎒 {self.target_name.upper()}'S VAULT STORAGE",
+            description=f"🪙 **Coins Wallet Balance:** `{self.total_coins}` coins",
+            color=r_color
+        )
+        embed.add_field(name=f"{r_emoji} {card_data['name'].upper()}", value=f"```\nOVERALL: {card_data['overall']} OVR\nRARITY:  {card_data['rarity']}\n```", inline=False)
+        embed.add_field(name="📦 Possession Details", value=f"```\nOWNED COPIES: x{owned_count}\nCARD ID:      {c_id}\n```", inline=False)
+        embed.set_footer(text=f"Owned Item {self.current_index + 1} of {len(self.sorted_inv)} | Click arrows to inspect deck")
+        
+        if card_data.get("image_url"):
+            embed.set_thumbnail(url=card_data["image_url"])
+        return embed
+
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_index > 0:
+            self.current_index -= 1
+        else:
+            self.current_index = self.max_index
+        await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
+
+    @discord.ui.button(label="Next Item ▶", style=discord.ButtonStyle.success)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_index < self.max_index:
+            self.current_index += 1
+        else:
+            self.current_index = 0
+        await interaction.response.edit_message(embed=self.make_card_embed(), view=self)
+
+
+@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix using click buttons")
+async def catalog(ctx):
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
-        key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"])
+        key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"])
     )
     
-    per_page = 5  # Reduced to 5 per page so the individual cards don't clutter the screen
-    max_p = max(1, (len(sorted_cards) + per_page - 1) // per_page)
-    page = max(1, min(page, max_p))
-    
-    start_idx = (page - 1) * per_page
-    end_idx = page * per_page
-    
-    await ctx.defer()
-    
-    # Send cards as a sequence of clean, colored card embeds
-    for card_id, c in sorted_cards[start_idx:end_idx]:
-        r_color = RARITY_COLORS.get(c['rarity'], 0x3498db)
-        r_emoji = get_rarity_emoji(c['rarity'])
-        
-        embed = discord.Embed(
-            title=f"{r_emoji} {c['name'].upper()}", 
-            color=r_color
-        )
-        embed.add_field(name="📈 Attributes", value=f"```\nOVERALL: {c['overall']} OVR\nRARITY:  {c['rarity']}\n```", inline=True)
-        embed.add_field(name="🆔 Card Serial", value=f"```\nID: {card_id}\n```", inline=True)
-        
-        if c.get("image_url"):
-            embed.set_thumbnail(url=c["image_url"])
-            
-        await ctx.send(embed=embed)
-        
-    # Send a small footer message to navigate pages
-    await ctx.send(f"📖 **Catalog Page {page}/{max_p}** | Total Blueprints: `{len(sorted_cards)}` | Use `/catalog page:{page+1 if page < max_p else 1}` to view more.")
+    view = CatalogPaginationView(sorted_cards)
+    await ctx.send(embed=view.make_card_embed(), view=view)
 
 
-@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage")
+@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage via interactive buttons")
 async def inventory(ctx, player: discord.Member = None):
     t = player or ctx.author
     t_id = str(t.id)
@@ -870,37 +938,9 @@ async def inventory(ctx, player: discord.Member = None):
         key=lambda x: (RARITY_ORDER.index(DATA["global_cards"][x]["rarity"]) if DATA["global_cards"][x]["rarity"] in RARITY_ORDER else 99, -DATA["global_cards"][x]["overall"])
     )
     
-    await ctx.defer()
-    
-    # Send an initial wallet dashboard header
-    wallet_embed = discord.Embed(
-        title=f"🎒 Vault Storage: {t.display_name}",
-        description=f"🪙 **Coins Wallet:** `{DATA['users'][t_id]['coins']}` coins\n Total Unique Items: `{len(sorted_inv)}`",
-        color=0x9b59b6
-    )
-    await ctx.send(embed=wallet_embed)
-    
-    # Display up to the first 6 rarest cards as beautiful distinct boxes to prevent message spam limits
-    for c_id in sorted_inv[:6]:
-        card_data = DATA["global_cards"][c_id]
-        r_color = RARITY_COLORS.get(card_data['rarity'], 0x3498db)
-        r_emoji = get_rarity_emoji(card_data['rarity'])
-        owned_count = inv[c_id]
-        
-        card_embed = discord.Embed(
-            title=f"{r_emoji} {card_data['name'].upper()}",
-            color=r_color
-        )
-        card_embed.add_field(name="📈 Stats", value=f"```\nOVERALL: {card_data['overall']} OVR\nRARITY:  {card_data['rarity']}\n```", inline=True)
-        card_embed.add_field(name="📦 Possession", value=f"```\nOWNED:  x{owned_count}\nID:     {c_id}\n```", inline=True)
-        
-        if card_data.get("image_url"):
-            embed.set_thumbnail(url=card_data["image_url"])
-            
-        await ctx.send(embed=card_embed)
-        
-    if len(sorted_inv) > 6:
-        await ctx.send(f"ℹ️ *Showing your top 6 rarest items. Your vault contains {len(sorted_inv) - 6} more variations inside.*")
+    total_coins = DATA["users"][t_id]["coins"]
+    view = InventoryPaginationView(t.display_name, sorted_inv, inv, total_coins)
+    await ctx.send(embed=view.make_card_embed(), view=view)
 
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
