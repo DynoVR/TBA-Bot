@@ -990,14 +990,21 @@ async def inventory(ctx, player: discord.Member = None):
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
 # ==============================================================================
+# ==============================================================================
+# --- INTERACTION TRADING MODULES ---
+# ==============================================================================
+
+# ==============================================================================
+# --- UPGRADED MULTI-CARD INTERACTION TRADING MODULES ---
+# ==============================================================================
 
 class TradeView(discord.ui.View):
-    def __init__(self, sender, receiver, s_card, r_card):
+    def __init__(self, sender, receiver, s_cards_list, r_cards_list):
         super().__init__(timeout=120)
         self.sender = sender
         self.receiver = receiver
-        self.s_card = s_card
-        self.r_card = r_card
+        self.s_cards = s_cards_list  # Array list of sender card IDs
+        self.r_cards = r_cards_list  # Array list of receiver card IDs
 
     @discord.ui.button(label="Accept Trade", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1008,18 +1015,25 @@ class TradeView(discord.ui.View):
         s_inv = DATA["users"][s_id]["inventory"]
         r_inv = DATA["users"][r_id]["inventory"]
         
-        if s_inv.get(self.s_card, 0) < 1 or r_inv.get(self.r_card, 0) < 1:
-            return await interaction.response.send_message("❌ Items mismatch: Assets transferred positions outside tracking blocks.", ephemeral=True)
-            
-        s_inv[self.s_card] -= 1
-        r_inv[self.r_card] -= 1
+        # DOUBLE CHECK: Ensure all items are still in possession right before finalizing
+        for c_id in self.s_cards:
+            if s_inv.get(c_id, 0) < self.s_cards.count(c_id):
+                return await interaction.response.send_message(f"❌ **Trade Aborted:** {self.sender.display_name} no longer owns enough copies of `{c_id}`.", ephemeral=True)
+        for c_id in self.r_cards:
+            if r_inv.get(c_id, 0) < self.r_cards.count(c_id):
+                return await interaction.response.send_message(f"❌ **Trade Aborted:** You no longer own enough copies of `{c_id}`.", ephemeral=True)
+                
+        # Deduct all assets
+        for c_id in self.s_cards: s_inv[c_id] -= 1
+        for c_id in self.r_cards: r_inv[c_id] -= 1
         
-        s_inv[self.r_card] = s_inv.get(self.r_card, 0) + 1
-        r_inv[self.s_card] = r_inv.get(self.s_card, 0) + 1
+        # Credit all assets
+        for c_id in self.s_cards: r_inv[c_id] = r_inv.get(c_id, 0) + 1
+        for c_id in self.r_cards: s_inv[c_id] = s_inv.get(c_id, 0) + 1
         
         save_data()
         self.stop()
-        await interaction.response.edit_message(content=f"✅ Trade Executed! Swapped items successfully between {self.sender.mention} and {self.receiver.mention}.", view=None)
+        await interaction.response.edit_message(content=f"✅ **Multi-Trade Executed!** Transaction settled between {self.sender.mention} and {self.receiver.mention}.", view=None)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1027,7 +1041,50 @@ class TradeView(discord.ui.View):
             return await interaction.response.send_message("❌ Access Restricted: You are not a participant in this transaction loop.", ephemeral=True)
             
         self.stop()
-        await interaction.response.edit_message(content="🛑 Trade Cancelled. Propose transaction rejected.", view=None)
+        await interaction.response.edit_message(content="🛑 Trade Cancelled. Offer was declined.", view=None)
+
+
+@bot.hybrid_command(name="trade", description="Public Command: Swap multiple cards at once using comma-separated lists")
+async def trade(ctx, target_player: discord.Member, your_card_ids: str, their_card_ids: str):
+    if target_player == ctx.author: 
+        return await ctx.send("❌ Self-trading is blocked.")
+        
+    s_id, r_id = str(ctx.author.id), str(target_player.id)
+    verify_user(s_id, ctx.author.display_name)
+    verify_user(r_id, target_player.display_name)
+    
+    # Parse inputs by splitting strings by commas and stripping whitespace
+    s_cards = [cid.strip() for cid in your_card_ids.split(",") if cid.strip()]
+    r_cards = [cid.strip() for cid in their_card_ids.split(",") if cid.strip()]
+    
+    if not s_cards or not r_cards:
+        return await ctx.send("❌ **Input Error:** You must provide at least one card ID for each side.")
+
+    # 1. Validate Sender Assets
+    for c_id in s_cards:
+        if c_id not in DATA["global_cards"]:
+            return await ctx.send(f"❌ **Error:** Card ID `{c_id}` does not exist in the master catalog.")
+        if DATA["users"][s_id]["inventory"].get(c_id, 0) < s_cards.count(c_id):
+            return await ctx.send(f"❌ **Error:** You do not own enough copies of `{c_id}` to complete this trade.")
+            
+    # 2. Validate Receiver Assets
+    for c_id in r_cards:
+        if c_id not in DATA["global_cards"]:
+            return await ctx.send(f"❌ **Error:** Card ID `{c_id}` does not exist in the master catalog.")
+        if DATA["users"][r_id]["inventory"].get(c_id, 0) < r_cards.count(c_id):
+            return await ctx.send(f"❌ **Error:** {target_player.display_name} does not own enough copies of `{c_id}`.")
+
+    # 3. Compile a clean visual text list for the trade interface display card
+    sender_offer = "\n".join([f"• **[{DATA['global_cards'][cid]['rarity']}]** {DATA['global_cards'][cid]['name']} (`{cid}`)" for cid in s_cards])
+    receiver_offer = "\n".join([f"• **[{DATA['global_cards'][cid]['rarity']}]** {DATA['global_cards'][cid]['name']} (`{cid}`)" for cid in r_cards])
+    
+    embed = discord.Embed(title="🤝 Incoming Multi-Card Trade Proposal", color=0x3498db)
+    embed.add_field(name=f"📤 {ctx.author.display_name} Offers:", value=sender_offer, inline=False)
+    embed.add_field(name=f"📥 Requested From {target_player.display_name}:", value=receiver_offer, inline=False)
+    embed.set_footer(text="This pending proposal windows expires in 120 seconds.")
+    
+    view = TradeView(ctx.author, target_player, s_cards, r_cards)
+    await ctx.send(f"🤝 {target_player.mention}, you received a trade offer from {ctx.author.mention}!", embed=embed, view=view)
 
 # ==============================================================================
 # --- STAFF CONFIGURATION & REWARD ADMINISTRATIVE UTILITIES ---
