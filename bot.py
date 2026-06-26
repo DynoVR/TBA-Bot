@@ -527,6 +527,32 @@ async def editcoins(ctx, action: str, player: discord.Member, amount: int):
 # --- INTERACTIVE CARD LIQUIDATION ENGINE & STORE SYSTEMS ---
 # ==============================================================================
 
+@bot.hybrid_command(name="setpackprice", description="Staff Command: Configure the purchase price of card packs")
+@is_staff()
+@app_commands.choices(size=[
+    app_commands.Choice(name="3 Players Pack", value=3),
+    app_commands.Choice(name="5 Players Pack", value=5),
+    app_commands.Choice(name="10 Players Pack", value=10)
+])
+async def setpackprice(ctx, size: int, new_price: int):
+    if new_price < 0:
+        return await ctx.send("❌ **Input Error:** Pack prices cannot be negative values.")
+        
+    # Safeguard underlying structure nodes mapping parameters
+    if "config" not in DATA: 
+        DATA["config"] = {}
+    
+    # Store the pricing data directly into memory arrays
+    DATA["config"][f"pack_{size}_price"] = new_price
+    
+    # Force synchronous live write backup pipeline syncs straight to the cloud
+    save_data()
+    
+    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
+    embed.description = f"Successfully set the price of the **{size} Player Pack** to `{new_price}` coins 🪙."
+    await ctx.send(embed=embed)
+
+
 @bot.hybrid_command(name="changecardprice", description="Staff Command: Configure how much currency a player receives when selling a specific rarity")
 @is_staff()
 @app_commands.choices(rarity=[app_commands.Choice(name=r, value=r) for r in RARITY_ORDER])
