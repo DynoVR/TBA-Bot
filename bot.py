@@ -88,7 +88,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command("help")
 
-
 # ==============================================================================
 # --- FIXED DATABASE CLOUD ROUTING CORE ENGINE ---
 # ==============================================================================
@@ -109,13 +108,15 @@ def load_data():
             "X-Master-Key": db_key,
             "X-Bin-Meta": "false"
         }
-        res = requests.get(db_url, headers=headers)
+        print("📡 Sending secure payload request to cloud server...")
+        
+        # FIXED: Added a strict 5-second timeout constraint to prevent thread-locking freezes
+        res = requests.get(db_url, headers=headers, timeout=5)
         print(f"📡 Cloud Database Fetch Status Response Code: {res.status_code}")
         
         if res.status_code == 200:
             raw_json = res.json()
             
-            # FIXED: Strip jsonbin's hidden 'record' container wrapper if it exists
             if isinstance(raw_json, dict) and "record" in raw_json:
                 loaded_json = raw_json["record"]
             else:
@@ -124,7 +125,6 @@ def load_data():
             if isinstance(loaded_json, dict):
                 DATA = loaded_json
                 
-                # Automatically ensure critical base structures are alive
                 if "global_cards" not in DATA: DATA["global_cards"] = {}
                 if "users" not in DATA: DATA["users"] = {}
                 if "processed_neatque_matches" not in DATA: DATA["processed_neatque_matches"] = []
@@ -134,6 +134,8 @@ def load_data():
                 return
         else:
             print(f"❌ Cloud Pull Failed: Status {res.status_code}. Details: {res.text}")
+    except requests.exceptions.Timeout:
+        print("❌ CRITICAL: The connection to jsonbin.io timed out after 5 seconds! Check your link spelling or Render outbound traffic controls.")
     except Exception as e:
         print(f"❌ CRITICAL CONNECTION CRASH INSIDE LOAD_DATA: {e}")
 
