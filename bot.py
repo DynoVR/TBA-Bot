@@ -481,10 +481,47 @@ async def removecard(ctx, card_id: str):
     save_data()
     await ctx.send(f"🗑️ Successfully deleted version **[{rarity}] {card_name}** (`{card_id}`) from all active server inventory registries.")
 
+@bot.hybrid_command(name="editcoins", description="Staff Command: Securely give or take economy coins from a target player account")
+@is_staff()
+@app_commands.choices(action=[
+    app_commands.Choice(name="Give Coins", value="give"),
+    app_commands.Choice(name="Take Coins", value="take")
+])
+async def editcoins(ctx, action: str, player: discord.Member, amount: int):
+    if amount <= 0:
+        return await ctx.send("❌ **Input Error:** The coin adjustment amount parameters must be greater than 0.")
+        
+    user_id_str = str(player.id)
+    
+    # Securely verify that the user profile registry structure exists in memory
+    verify_user(user_id_str, player.display_name)
+    
+    current_coins = DATA["users"][user_id_str].get("coins", 150)
+    
+    if action == "give":
+        DATA["users"][user_id_str]["coins"] = current_coins + amount
+        message_response = f"🪙 **Coins Deposited!** Successfully credited `+{amount}` coins to {player.mention}."
+    elif action == "take":
+        # Safe constraint boundary check to prevent negative wallet values
+        if current_coins < amount:
+            new_balance = 0
+            message_response = f"⚠️ **Balance Warning:** Deducted all coins from {player.mention} as their vault held less than `{amount}`."
+        else:
+            new_balance = current_coins - amount
+            message_response = f"📉 **Coins Deducted!** Successfully removed `-{amount}` coins from {player.mention}."
+            
+        DATA["users"][user_id_str]["coins"] = new_balance
 
-# ==============================================================================
-# --- CARD PACK DRAW ENGINE & STORE SYSTEMS ---
-# ==============================================================================
+    # Force synchronous live write backup pipeline syncs
+    save_data()
+    
+    # Construct a clean embed summary overview display layout
+    embed = discord.Embed(title="🏦 Vault Balance Adjusted", description=message_response, color=0xFFD700)
+    embed.add_field(name="New Vault Total Balance", value=f"`{DATA['users'][user_id_str]['coins']}` coins 🪙", inline=False)
+    embed.set_footer(text=f"Transaction audited and authorized by {ctx.author.display_name}")
+    
+    await ctx.send(embed=embed)
+
 
 # ==============================================================================
 # --- INTERACTIVE CARD LIQUIDATION ENGINE & STORE SYSTEMS ---
@@ -740,14 +777,38 @@ async def claimweekly(ctx):
 
 
 
-@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix")
+# ==============================================================================
+# --- UPGRADED COLOR ANSI LEDGER VAULTS MODULES ---
+# ==============================================================================
+
+# ANSI color mapping registry function helper
+def get_ansi_card_line(card_name, rarity, overall, card_id, count=None):
+    ansi_map = {
+        "Average": "\u001b[1;36m",       # Light Blue
+        "Great": "\u001b[0;35m",         # Purple
+        "Epic": "\u001b[1;32m",          # Emerald Green
+        "Insane": "\u001b[1;35m",        # Royal Purple
+        "Pro": "\u001b[1;33m",           # Gold
+        "Juggernaut": "\u001b[1;31m",    # Orange Bronze (Red spectrum)
+        "Otherworldly": "\u001b[0;31m",  # Dark Red
+        "Specialty": "\u001b[1;37m"      # Bold White
+    }
+    color = ansi_map.get(rarity, "\u001b[0m")
+    reset = "\u001b[0m"
+    
+    if count is not None:
+        return f"{color}• {card_name} ({overall} OVR) - [{rarity}] x{count} | ID: {card_id}{reset}"
+    return f"{color}• {card_name} ({overall} OVR) - [{rarity}] | ID: {card_id}{reset}"
+
+
+@bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix with color codes")
 async def catalog(ctx, page: int = 1):
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
-        key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]), -x[1]["overall"])
+        key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"])
     )
     
     per_page = 8
@@ -759,18 +820,21 @@ async def catalog(ctx, page: int = 1):
     
     lines = []
     for card_id, c in sorted_cards[start_idx:end_idx]:
-        lines.append(f"• {c['name']} ({c['overall']} OVR) - [{c['rarity']}] | ID: `{card_id}`")
+        lines.append(get_ansi_card_line(c['name'], c['rarity'], c['overall'], card_id))
         
+    # Wraps the layout inside a markdown ANSI terminal codeblock frame to force execution
+    ansi_payload = "```ansi\n" + "\n".join(lines) + "\n```"
+    
     embed = discord.Embed(
         title="🏒 Master Cards Blueprint Directory Catalog", 
-        description="\n".join(lines), 
-        color=discord.Color.blue()
+        description=ansi_payload, 
+        color=0x3498db
     )
     embed.set_footer(text=f"Page {page}/{max_p} | Total Item Profiles: {len(sorted_cards)}")
     await ctx.send(embed=embed)
 
 
-@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage")
+@bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage highlighted in rarity colors")
 async def inventory(ctx, player: discord.Member = None):
     t = player or ctx.author
     t_id = str(t.id)
@@ -784,22 +848,26 @@ async def inventory(ctx, player: discord.Member = None):
         
     sorted_inv = sorted(
         valid, 
-        key=lambda x: (RARITY_ORDER.index(DATA["global_cards"][x]["rarity"]), -DATA["global_cards"][x]["overall"])
+        key=lambda x: (RARITY_ORDER.index(DATA["global_cards"][x]["rarity"]) if DATA["global_cards"][x]["rarity"] in RARITY_ORDER else 99, -DATA["global_cards"][x]["overall"])
     )
     
     lines = []
     for c_id in sorted_inv:
         card_data = DATA["global_cards"][c_id]
-        lines.append(f"• {card_data['name']} ({card_data['overall']} OVR) - [{card_data['rarity']}] x{inv[c_id]} | ID: `{c_id}`")
+        lines.append(get_ansi_card_line(card_data['name'], card_data['rarity'], card_data['overall'], c_id, inv[c_id]))
         
+    # Wraps the layout inside a markdown ANSI terminal codeblock frame to force execution
+    ansi_payload = "```ansi\n" + "\n".join(lines) + "\n```"
+    
     embed = discord.Embed(
         title=f"🎒 Vault Storage: {t.display_name}", 
-        description="\n".join(lines), 
-        color=discord.Color.purple()
+        description=ansi_payload, 
+        color=0x9b59b6
     )
     embed.add_field(name="Coins Wallet", value=f"{DATA['users'][t_id]['coins']} 🪙", inline=False)
     await ctx.send(embed=embed)
-    
+
+
 # ==============================================================================
 # --- INTERACTION TRADING MODULES ---
 # ==============================================================================
