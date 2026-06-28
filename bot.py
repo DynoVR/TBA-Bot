@@ -1821,26 +1821,52 @@ async def vsbot(ctx):
 # --- RETAIL STORE: PREMIUM TIERED WHEEL SPIN MODULES ---
 # ==============================================================================
 
+@bot.hybrid_command(name="setwheelprice", description="Staff Command: Configure the coin purchase price of Bronze, Silver, or Gold prize wheels")
+@is_staff()
+@app_commands.choices(wheel_tier=[
+    app_commands.Choice(name="Bronze Wheel", value="Bronze"),
+    app_commands.Choice(name="Silver Wheel", value="Silver"),
+    app_commands.Choice(name="Gold Wheel", value="Gold")
+])
+async def setwheelprice(ctx, wheel_tier: str, new_price: int):
+    if new_price < 0:
+        return await ctx.send("❌ **Input Error:** Wheel spin prices cannot be negative values.")
+        
+    if "config" not in DATA: 
+        DATA["config"] = {}
+    
+    # Securely saves using the clean shorthand text matching tokens
+    DATA["config"][f"wheel_{wheel_tier}_price"] = new_price
+    save_data()
+    
+    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
+    embed.description = f"Successfully updated the cost of the **{wheel_tier} Prize Wheel** to `{new_price}` coins 🪙."
+    await ctx.send(embed=embed)
+
+
 @bot.hybrid_command(name="wheelspin", description="Public Command: Spend coins to buy a Bronze, Silver, or Gold prize wheel card roll")
 @app_commands.choices(wheel_tier=[
-    app_commands.Choice(name="Bronze Wheel (100 coins) - Basic Odds", value="Bronze"),
-    app_commands.Choice(name="Silver Wheel (250 coins) - No Average Cards", value="Silver"),
-    app_commands.Choice(name="Gold Wheel (500 coins) - Insane Tier and Higher Only!", value="Gold")
+    app_commands.Choice(name="Bronze Wheel - Basic Odds", value="Bronze"),
+    app_commands.Choice(name="Silver Wheel - No Average Cards", value="Silver"),
+    app_commands.Choice(name="Gold Wheel - Insane Tier and Higher Only!", value="Gold")
 ])
 async def wheelspin(ctx, wheel_tier: str):
-    if not DATA["global_cards"]: return await ctx.send("❌ Error: Master blueprint blueprints records are empty.")
+    if not DATA["global_cards"]: 
+        return await ctx.send("❌ Error: Master blueprint records are empty.")
     
     u_id = str(ctx.author.id)
     verify_user(u_id, ctx.author.display_name)
     
-    # Establish Tier configurations properties array tables
-    tier_costs = {"Bronze": 100, "Silver": 250, "Gold": 500}
-    cost = tier_costs.get(wheel_tier, 100)
+    if "config" not in DATA: 
+        DATA["config"] = {}
+        
+    # FIXED CONFIG MATCHING: Both values are now forced to parse strictly as 'Bronze', 'Silver', or 'Gold'
+    tier_defaults = {"Bronze": 100, "Silver": 250, "Gold": 500}
+    cost = DATA["config"].get(f"wheel_{wheel_tier}_price", tier_defaults.get(wheel_tier, 100))
     
     if DATA["users"][u_id]["coins"] < cost:
         return await ctx.send(f"❌ Store Error: Insufficient funds. The {wheel_tier} Wheel costs `{cost}` coins (Your wallet holds: `{DATA['users'][u_id]['coins']}`).")
 
-    # Filter global catalog categories dynamically matching tier drop rates constraints
     pool = []
     for cid, c in DATA["global_cards"].items():
         r = c["rarity"]
@@ -1853,16 +1879,13 @@ async def wheelspin(ctx, wheel_tier: str):
     if not pool:
         return await ctx.send("❌ Configuration Error: No cards found matching this tier's drop filters.")
 
-    # Deduct wallet funds
     DATA["users"][u_id]["coins"] -= cost
     
-    # Draw winning card item
     chosen_id, card = random.choice(pool)
     DATA["users"][u_id]["inventory"][chosen_id] = DATA["users"][u_id]["inventory"].get(chosen_id, 0) + 1
     
     save_data()
 
-    # Draw visual framework assets color highlights codes matching your parameters
     r_color = RARITY_COLORS.get(card['rarity'], 0x3498db)
     r_emoji = get_rarity_emoji(card['rarity'])
 
@@ -1876,30 +1899,6 @@ async def wheelspin(ctx, wheel_tier: str):
         
     await ctx.send(embed=embed)
 
-@bot.hybrid_command(name="setwheelprice", description="Staff Command: Configure the coin purchase price of Bronze, Silver, or Gold prize wheels")
-@is_staff()
-@app_commands.choices(wheel_tier=[
-    app_commands.Choice(name="Bronze Wheel", value="Bronze"),
-    app_commands.Choice(name="Silver Wheel", value="Silver"),
-    app_commands.Choice(name="Gold Wheel", value="Gold")
-])
-async def setwheelprice(ctx, wheel_tier: str, new_price: int):
-    if new_price < 0:
-        return await ctx.send("❌ **Input Error:** Wheel spin prices cannot be negative values.")
-        
-    # Safeguard underlying structure nodes mapping parameters
-    if "config" not in DATA: 
-        DATA["config"] = {}
-    
-    # Store the pricing data dynamically into the config track
-    DATA["config"][f"wheel_{wheel_tier}_price"] = new_price
-    
-    # Force synchronous write backup pipeline straight to the cloud
-    save_data()
-    
-    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
-    embed.description = f"Successfully updated the cost of the **{wheel_tier} Prize Wheel** to `{new_price}` coins 🪙."
-    await ctx.send(embed=embed)
 
 # --- Start Services ---
 if __name__ == "__main__":
