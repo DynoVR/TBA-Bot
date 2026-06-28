@@ -1230,7 +1230,7 @@ async def on_message_edit(before, after):
             
             # 5. Distribute coins if winners are found
             if winning_user_ids:
-                reward_amount = DATA["config"].get("match_reward", 75)
+                reward_amount = DATA["config"].get("match_reward", (75)
                 awarded_mentions = []
                 
                 for p_id in winning_user_ids:
