@@ -75,20 +75,26 @@ DATA = {
     "matches": {},       
     "next_match_id": 1,
     "processed_neatque_matches": [],
-        "config": {
+    "config": {
         "pack_3_price": 150,
         "pack_5_price": 250,
         "pack_10_price": 400,
-        # --- NEW: DEFAULT WHEEL SPIN PRICE KEYS ---
         "wheel_Bronze_price": 100,
         "wheel_Silver_price": 250,
         "wheel_Gold_price": 500,
         "match_reward": 50,
         "sell_prices": {
-            "Average": 1, "Great": 5, "Epic": 15, "Insane": 25, "Pro": 100, "Juggernaut": 200, "Otherworldly": 750, "Specialty": 1000
+            "Average": 10,
+            "Great": 20,
+            "Epic": 40,
+            "Insane": 75,
+            "Pro": 150,
+            "Juggernaut": 300,
+            "Otherworldly": 750,
+            "Specialty": 1000
         }
     }
-
+}
 
 # --- Core Bot Client Initialization ---
 intents = discord.Intents.default()
