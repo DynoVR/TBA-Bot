@@ -1656,19 +1656,21 @@ class CPUBossArenaView(discord.ui.View):
     def __init__(self, player, p_cards, cpu_name, cpu_lineup, wager):
         super().__init__(timeout=120.0)
         self.player = player
+        # FIXED: Feeds a secondary pointer to satisfy the shared dropdown verification check
+        self.challenger = player  
         self.p_cards = p_cards
         self.cpu_name = cpu_name
-        self.cpu_lineup = cpu_lineup # Pre-loaded list of 3 card data items
+        self.cpu_lineup = cpu_lineup
         self.wager = wager
         self.message = None
         
+        self.challenger_lineup = [] # FIXED: Ensures selection storage matches multiplayer arrays
         self.player_lineup = []
         self.current_round = 1
         self.player_score = 0
         self.cpu_score = 0
         self.round_history_log = []
 
-        # Add private draft menu dropdown tracking properties
         self.add_item(BattleRosterSelect(f"👉 Select 3 Cards to fight {cpu_name}", p_cards, "challenger", str(player.id)))
 
     async def on_timeout(self):
