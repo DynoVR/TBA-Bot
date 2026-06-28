@@ -75,25 +75,20 @@ DATA = {
     "matches": {},       
     "next_match_id": 1,
     "processed_neatque_matches": [],
-    "config": {
+        "config": {
         "pack_3_price": 150,
         "pack_5_price": 250,
         "pack_10_price": 400,
-        "match_reward": 75,
-        "queue_role_id": None,
-        "match_role_id": None,
+        # --- NEW: DEFAULT WHEEL SPIN PRICE KEYS ---
+        "wheel_Bronze_price": 100,
+        "wheel_Silver_price": 250,
+        "wheel_Gold_price": 500,
+        "match_reward": 50,
         "sell_prices": {
-            "Average": 1,
-            "Great": 2,
-            "Epic": 5,
-            "Insane": 10,
-            "Pro": 25,
-            "Juggernaut": 100,
-            "Otherworldly": 300,
-            "Specialty": 750
+            "Average": 1, "Great": 5, "Epic": 15, "Insane": 25, "Pro": 100, "Juggernaut": 200, "Otherworldly": 750, "Specialty": 1000
         }
     }
-}
+
 
 # --- Core Bot Client Initialization ---
 intents = discord.Intents.default()
@@ -186,33 +181,22 @@ def save_data():
 
 def verify_user(user_id_str, username="Unknown"):
     global DATA
-    
     if not DATA or "users" not in DATA:
         if DB_URL and DB_KEY:
             try:
                 headers = {"X-Master-Key": DB_KEY, "X-Bin-Meta": "false"}
                 res = requests.get(DB_URL, headers=headers)
-                if res.status_code == 200:
-                    DATA = res.json()
-            except Exception as e:
-                print(f"❌ Force pull inside verify_user failed: {e}")
+                if res.status_code == 200: DATA = res.json()
+            except Exception as e: print(f"❌ Force pull inside verify_user failed: {e}")
 
-    if "users" not in DATA:
-        DATA["users"] = {}
-        
+    if "users" not in DATA: DATA["users"] = {}
     if user_id_str not in DATA["users"]:
         DATA["users"][user_id_str] = {
-            "name": username, 
-            "coins": 150, 
-            "inventory": {},
-            "card_cooldowns": {},  # NEW: Tracks individual card timestamp locks
-            "last_weekly": None, 
-            "wins": 0, 
-            "losses": 0
+            "name": username, "coins": 150, "inventory": {}, "card_cooldowns": {},
+            "last_weekly": None, "last_cpu_boss": None, "wins": 0, "losses": 0
         }
-    # Safety patch: Ensure old existing profiles don't crash if they lack the key
-    elif "card_cooldowns" not in DATA["users"][user_id_str]:
-        DATA["users"][user_id_str]["card_cooldowns"] = {}
+    elif "last_cpu_boss" not in DATA["users"][user_id_str]:
+        DATA["users"][user_id_str]["last_cpu_boss"] = None
 
 # --- Permission Check Decorators ---
 def is_staff():
@@ -1658,7 +1642,257 @@ async def challenge(ctx, opponent: discord.Member, wager: int):
     view = AdvancedBattleArenaView(ctx.author, opponent, c_valid, t_valid, wager)
     view.message = await ctx.send(embed=embed, view=view)
 
+# ==============================================================================
+# --- EXHIBITION STADIUM: VS CPU BOSS MODE ENGINE ---
+# ==============================================================================
 
+class CPUBossArenaView(discord.ui.View):
+    def __init__(self, player, p_cards, cpu_name, cpu_lineup, wager):
+        super().__init__(timeout=120.0)
+        self.player = player
+        self.p_cards = p_cards
+        self.cpu_name = cpu_name
+        self.cpu_lineup = cpu_lineup # Pre-loaded list of 3 card data items
+        self.wager = wager
+        self.message = None
+        
+        self.player_lineup = []
+        self.current_round = 1
+        self.player_score = 0
+        self.cpu_score = 0
+        self.round_history_log = []
+
+        # Add private draft menu dropdown tracking properties
+        self.add_item(BattleRosterSelect(f"👉 Select 3 Cards to fight {cpu_name}", p_cards, "challenger", str(player.id)))
+
+    async def on_timeout(self):
+        if self.message:
+            embed = discord.Embed(title="⏳ Exhibition Hall Abandoned", description="You took too long to draft or roll against the CPU boss. Lobby dissolved.", color=discord.Color.red())
+            try: await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+
+    async def check_draft_status(self, interaction: discord.Interaction):
+        # We manually map challenger choices straight over since CPU selections are automated
+        if len(self.challenger_lineup) == 3:
+            self.player_lineup = self.challenger_lineup
+            self.clear_items()
+            
+            # Deduct wager entry stake safely
+            p_id_str = str(self.player.id)
+            DATA["users"][p_id_str]["coins"] -= self.wager
+            
+            # Setup interactive Single-Player sync buttons
+            self.roll_btn = discord.ui.Button(label="🎲 Roll Against CPU", style=discord.ButtonStyle.primary, row=0)
+            self.roll_btn.callback = self.player_roll_callback
+            self.add_item(self.roll_btn)
+            
+            await self.render_combat_screen(interaction)
+
+    async def render_combat_screen(self, interaction: discord.Interaction):
+        embed = discord.Embed(title=f"🏟️ VS {self.cpu_name.upper()} | Round {self.current_round} of 3", color=0x3498db)
+        embed.description = f"👤 **Player Status:** Ready to Roll!\n🤖 **CPU Status:** Waiting for your move...\n\nClick the button below to clash weights!"
+        if self.round_history_log:
+            embed.add_field(name="📜 Exhibition Combat Logs", value="\n".join(self.round_history_log), inline=False)
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def player_roll_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.player.id:
+            return await interaction.response.send_message("❌ This is a private exhibition hall match loop.", ephemeral=True)
+            
+        self.timeout = 60.0
+        p_id_str = str(self.player.id)
+        
+        idx = self.current_round - 1
+        p_cid = self.player_lineup[idx]
+        cpu_card = self.cpu_lineup[idx] # Raw loaded dictionary
+        
+        p_card = DATA["global_cards"][p_cid]
+        
+        # Stamina stamping allocation rules applied
+        now_iso = datetime.now().isoformat()
+        if "card_cooldowns" not in DATA["users"][p_id_str]: DATA["users"][p_id_str]["card_cooldowns"] = {}
+        if p_cid not in DATA["users"][p_id_str]["card_cooldowns"]: DATA["users"][p_id_str]["card_cooldowns"][p_cid] = []
+        DATA["users"][p_id_str]["card_cooldowns"][p_cid].append(now_iso)
+
+        p_roll = random.randint(1, 20)
+        cpu_roll = random.randint(1, 20)
+        
+        p_total = p_card["overall"] + p_roll
+        cpu_total = cpu_card["overall"] + cpu_roll
+        
+        r_winner = ""
+        if p_total > cpu_total:
+            self.player_score += 1
+            r_winner = self.player.display_name
+        elif cpu_total > p_total:
+            self.cpu_score += 1
+            r_winner = self.cpu_name
+        else:
+            if random.choice([True, False]):
+                self.player_score += 1
+                r_winner = self.player.display_name
+            else:
+                self.cpu_score += 1
+                r_winner = self.cpu_name
+
+        self.round_history_log.append(
+            f"🥊 **ROUND {self.current_round} SUMMARY:**\n"
+            f"👤 {self.player.display_name}: **{p_card['name']}** ({p_card['overall']} OVR + {p_roll} Roll = `{p_total}`)\n"
+            f"🤖 {self.cpu_name}: **{cpu_card['name']}** ({cpu_card['overall']} OVR + {cpu_roll} Roll = `{cpu_total}`)\n"
+            f"👑 Winner: **{r_winner}**\n"
+        )
+
+        if self.player_score == 2 or self.cpu_score == 2:
+            self.clear_items()
+            await self.finalize_exhibition(interaction)
+        elif self.current_round < 3:
+            self.current_round += 1
+            await self.render_combat_screen(interaction)
+        else:
+            self.clear_items()
+            await self.finalize_exhibition(interaction)
+
+    async def finalize_exhibition(self, interaction: discord.Interaction):
+        p_id_str = str(self.player.id)
+        
+        if self.player_score > self.cpu_score:
+            winnings = self.wager * 2
+            DATA["users"][p_id_str]["coins"] += winnings
+            DATA["users"][p_id_str]["wins"] += 1
+            DATA["users"][p_id_str]["last_cpu_boss"] = datetime.now().date().isoformat()
+            result_title = "🎉 STADIUM BOSS DEFEATED!"
+            result_desc = f"Congratulations! You smashed the CPU lineup and claimed the **{winnings} coins** reward pot! 🪙"
+        else:
+            DATA["users"][p_id_str]["losses"] += 1
+            result_title = "💀 ARENA CRUSHED"
+            result_desc = f"The {self.cpu_name} out-rolled your squad. You lost your `{self.wager}` coins wager stake entry."
+
+        save_data()
+        
+        embed = discord.Embed(title=result_title, description=f"{result_desc}\n\n" + "\n".join(self.round_history_log), color=0x2ecc71 if self.player_score > self.cpu_score else 0xe74c3c)
+        await interaction.message.edit(embed=embed, view=None)
+
+
+@bot.hybrid_command(name="vsbot", description="Public Command: Fight a daily rotating automated CPU boss card team to earn coins")
+async def vsbot(ctx):
+    if not DATA["global_cards"]: return await ctx.send("❌ Master database catalog records are uninitialized.")
+    
+    p_id = str(ctx.author.id)
+    verify_user(p_id, ctx.author.display_name)
+    
+    # Check 24-hour daily boss challenge lock limits
+    today_iso = datetime.now().date().isoformat()
+    if DATA["users"][p_id].get("last_cpu_boss") == today_iso:
+        return await ctx.send("⏳ **Lockout Active:** You already defeated today's CPU Boss! Come back tomorrow for a fresh team.")
+        
+    wager = 50
+    if DATA["users"][p_id]["coins"] < wager:
+        return await ctx.send(f"❌ Vault Error: You need at least `{wager}` coins to challenge the arena box.")
+
+    p_valid = [(cid, DATA["global_cards"][cid], count) for cid, count in DATA["users"][p_id].get("inventory", {}).items() if count > 0 and cid in DATA["global_cards"]]
+    if len(p_valid) < 3:
+        return await ctx.send("❌ **Battle Denied:** You need at least 3 cards in your binder to enter the exhibition modes.")
+
+    # Sort layouts mapping tuples
+    p_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
+
+    # AUTOMATED SQUAD GENERATION ROUTINE: Pick 3 random cards from the global deck catalog
+    all_card_ids = list(DATA["global_cards"].keys())
+    cpu_ids = random.choices(all_card_ids, k=3)
+    cpu_lineup = [DATA["global_cards"][cid] for cid in cpu_ids]
+    
+    cpu_boss_names = ["The Steel Anchor Bot", "Cyber Netmind Blocker", "The Frozen Titan AI", "Glitch Blade Skater"]
+    cpu_name = random.choice(cpu_boss_names)
+
+    embed = discord.Embed(title="🏒 Exhibition Hall: Daily Boss Encounter", color=0x3498db)
+    embed.description = f"🥊 **Boss Identity:** {cpu_name}\n🪙 **Entry Stake Cost:** `{wager}` Coins\n💰 **Winnings Payout Pot:** `{wager * 2}` Coins\n\n*Select your 3 non-fatigued card deck targets below to lock handles!*"
+    
+    view = CPUBossArenaView(ctx.author, p_valid, cpu_name, cpu_lineup, wager)
+    view.message = await ctx.send(embed=embed, view=view)
+
+# ==============================================================================
+# --- RETAIL STORE: PREMIUM TIERED WHEEL SPIN MODULES ---
+# ==============================================================================
+
+@bot.hybrid_command(name="wheelspin", description="Public Command: Spend coins to buy a Bronze, Silver, or Gold prize wheel card roll")
+@app_commands.choices(wheel_tier=[
+    app_commands.Choice(name="Bronze Wheel (100 coins) - Basic Odds", value="Bronze"),
+    app_commands.Choice(name="Silver Wheel (250 coins) - No Average Cards", value="Silver"),
+    app_commands.Choice(name="Gold Wheel (500 coins) - Insane Tier and Higher Only!", value="Gold")
+])
+async def wheelspin(ctx, wheel_tier: str):
+    if not DATA["global_cards"]: return await ctx.send("❌ Error: Master blueprint blueprints records are empty.")
+    
+    u_id = str(ctx.author.id)
+    verify_user(u_id, ctx.author.display_name)
+    
+    # Establish Tier configurations properties array tables
+    tier_costs = {"Bronze": 100, "Silver": 250, "Gold": 500}
+    cost = tier_costs.get(wheel_tier, 100)
+    
+    if DATA["users"][u_id]["coins"] < cost:
+        return await ctx.send(f"❌ Store Error: Insufficient funds. The {wheel_tier} Wheel costs `{cost}` coins (Your wallet holds: `{DATA['users'][u_id]['coins']}`).")
+
+    # Filter global catalog categories dynamically matching tier drop rates constraints
+    pool = []
+    for cid, c in DATA["global_cards"].items():
+        r = c["rarity"]
+        if wheel_tier == "Silver" and r == "Average":
+            continue
+        elif wheel_tier == "Gold" and r in ["Average", "Great", "Epic"]:
+            continue
+        pool.append((cid, c))
+
+    if not pool:
+        return await ctx.send("❌ Configuration Error: No cards found matching this tier's drop filters.")
+
+    # Deduct wallet funds
+    DATA["users"][u_id]["coins"] -= cost
+    
+    # Draw winning card item
+    chosen_id, card = random.choice(pool)
+    DATA["users"][u_id]["inventory"][chosen_id] = DATA["users"][u_id]["inventory"].get(chosen_id, 0) + 1
+    
+    save_data()
+
+    # Draw visual framework assets color highlights codes matching your parameters
+    r_color = RARITY_COLORS.get(card['rarity'], 0x3498db)
+    r_emoji = get_rarity_emoji(card['rarity'])
+
+    embed = discord.Embed(title=f"🎡 {wheel_tier.upper()} PRIZE WHEEL SETTLED", color=r_color)
+    embed.description = f"🎯 The wheel spins, sparks fly, and click-clacks down onto a matching prize sector allocation!\n\n🛍️ **Item Deposited into your Inventory Vault:**"
+    embed.add_field(name=f"{r_emoji} {card['name'].upper()}", value=f"```\nOVERALL: {card['overall']} OVR\nRARITY:  {card['rarity']}\nCARD ID: {chosen_id}\n```", inline=False)
+    embed.add_field(name="🏦 Updated Wallet Balance", value=f"`{DATA['users'][u_id]['coins']}` coins 🪙", inline=False)
+    
+    if card.get("image_url"):
+        embed.set_image(url=card["image_url"])
+        
+    await ctx.send(embed=embed)
+
+@bot.hybrid_command(name="setwheelprice", description="Staff Command: Configure the coin purchase price of Bronze, Silver, or Gold prize wheels")
+@is_staff()
+@app_commands.choices(wheel_tier=[
+    app_commands.Choice(name="Bronze Wheel", value="Bronze"),
+    app_commands.Choice(name="Silver Wheel", value="Silver"),
+    app_commands.Choice(name="Gold Wheel", value="Gold")
+])
+async def setwheelprice(ctx, wheel_tier: str, new_price: int):
+    if new_price < 0:
+        return await ctx.send("❌ **Input Error:** Wheel spin prices cannot be negative values.")
+        
+    # Safeguard underlying structure nodes mapping parameters
+    if "config" not in DATA: 
+        DATA["config"] = {}
+    
+    # Store the pricing data dynamically into the config track
+    DATA["config"][f"wheel_{wheel_tier}_price"] = new_price
+    
+    # Force synchronous write backup pipeline straight to the cloud
+    save_data()
+    
+    embed = discord.Embed(title="⚙️ Store Configuration Updated", color=0x3498db)
+    embed.description = f"Successfully updated the cost of the **{wheel_tier} Prize Wheel** to `{new_price}` coins 🪙."
+    await ctx.send(embed=embed)
 
 # --- Start Services ---
 if __name__ == "__main__":
