@@ -79,7 +79,7 @@ DATA = {
         "pack_3_price": 150,
         "pack_5_price": 250,
         "pack_10_price": 400,
-        "match_reward": 50,
+        "match_reward": 75,
         "queue_role_id": None,
         "match_role_id": None,
         "sell_prices": {
@@ -1230,7 +1230,7 @@ async def on_message_edit(before, after):
             
             # 5. Distribute coins if winners are found
             if winning_user_ids:
-                reward_amount = DATA["config"].get("match_reward", 50)
+                reward_amount = DATA["config"].get("match_reward", 75)
                 awarded_mentions = []
                 
                 for p_id in winning_user_ids:
