@@ -410,7 +410,6 @@ async def setmatchreward(ctx, amount: int):
 async def help_command(ctx):
     embed = discord.Embed(title="🏒 League System Command Directory", color=discord.Color.blue())
     embed.add_field(name="🌐 Public Card Commands", value="`/catalog` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_ids> <their_card_ids>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
-    embed.add_field(name="⚔️ Matchmaking Commands", value="`/setupqueue <size>` - Deploy interactive match waiting panel\n`Buttons` - Join/Leave queue pool interface nodes", inline=False)
     embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <rarity> <overall> [player] [specialty_title] [image_url]` - Initialize new card profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <action> <player> <amount>` - Change balance values safely\n`/setpackprice <size> <new_price>` - Configure the purchase price of card packs\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
     await ctx.send(embed=embed)
 
@@ -970,21 +969,27 @@ class InventoryPaginationView(discord.ui.View):
 
 @bot.hybrid_command(name="catalog", description="Public Command: Inspect card master directory records matrix using click buttons and jump slots")
 async def catalog(ctx):
+    # FIXED: Defers the response instantly to prevent the 3-second timeout crash
+    await ctx.defer()
+    
     if not DATA["global_cards"]: 
         return await ctx.send("📂 Master database catalog uninitialized.")
         
-    # FIXED SORT LAYOUT MATRIX ROUTE PATHING
     sorted_cards = sorted(
         DATA["global_cards"].items(), 
         key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"])
     )
     
     view = CatalogPaginationView(sorted_cards)
+    # Use followups/context send safely after deferrals
     await ctx.send(embed=view.make_card_embed(), view=view)
 
 
 @bot.hybrid_command(name="inventory", description="Public Command: View owned personal cards vault storage via buttons and jump slots")
 async def inventory(ctx, player: discord.Member = None):
+    # FIXED: Defers the response instantly to prevent the 3-second timeout crash
+    await ctx.defer()
+    
     t = player or ctx.author
     t_id = str(t.id)
     verify_user(t_id, t.display_name)
