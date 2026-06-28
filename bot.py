@@ -1456,12 +1456,6 @@ class AdvancedBattleArenaView(discord.ui.View):
         
         # Safety net balance deductions execute explicitly on Round 1 launch
         if self.current_round == 1:
-            
-    async def process_combat_round(self, interaction: discord.Interaction):
-        c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
-        
-        # Safety net balance deductions execute explicitly on Round 1 launch
-        if self.current_round == 1:
             if DATA["users"][c_id_str]["coins"] < self.wager or DATA["users"][t_id_str]["coins"] < self.wager:
                 self.clear_items()
                 return await interaction.message.edit(content="❌ **Combat Aborted:** Financial liquidity failure mid-round setup.", embed=None, view=None)
