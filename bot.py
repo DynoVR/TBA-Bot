@@ -1778,7 +1778,6 @@ class CPUBossArenaView(discord.ui.View):
         embed = discord.Embed(title=result_title, description=f"{result_desc}\n\n" + "\n".join(self.round_history_log), color=0x2ecc71 if self.player_score > self.cpu_score else 0xe74c3c)
         await interaction.message.edit(embed=embed, view=None)
 
-
 @bot.hybrid_command(name="vsbot", description="Public Command: Fight a daily rotating automated CPU boss card team to earn coins")
 async def vsbot(ctx):
     if not DATA["global_cards"]: return await ctx.send("❌ Master database catalog records are uninitialized.")
@@ -1799,8 +1798,8 @@ async def vsbot(ctx):
     if len(p_valid) < 3:
         return await ctx.send("❌ **Battle Denied:** You need at least 3 cards in your binder to enter the exhibition modes.")
 
-    # Sort layouts mapping tuples
-    p_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
+    # FIXED SORT LAYOUT: x[1] correctly grabs the inner dictionary index data so it can read keys like 'rarity' and 'overall' safely
+    p_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
 
     # AUTOMATED SQUAD GENERATION ROUTINE: Pick 3 random cards from the global deck catalog
     all_card_ids = list(DATA["global_cards"].keys())
