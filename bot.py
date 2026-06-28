@@ -410,7 +410,7 @@ async def setmatchreward(ctx, amount: int):
 async def help_command(ctx):
     embed = discord.Embed(title="🏒 League System Command Directory", color=discord.Color.blue())
     embed.add_field(name="🌐 Public Card Commands", value="`/catalog` - View master card list\n`/inventory [player]` - Inspect owned profile card vault\n`/buypack <size>` - Purchase 3, 5, or 10 random players\n`/claimweekly` - Claim free 3-pack weekly box reward\n`/trade <target> <your_card_ids> <their_card_ids>` - Swap card assets safely\n`/leaderboard` - Check competitive win ratings standings", inline=False)
-    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <rarity> <overall> [player] [specialty_title] [image_url]` - Initialize new card profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <action> <player> <amount>` - Change balance values safely\n`/setpackprice <size> <new_price>` - Configure the purchase price of card packs\n`/cancelmatch <match_id>` - Terminate an active game room instances layer\n`/substitute <match_id> <old_player> <new_player>` - Swap players mid-match series", inline=False)
+    embed.add_field(name="🛡️ Staff Administration (Requires Staff Role/Owner)", value="`/setstaffrole <role>` - Update staff role reference mapping\n`/setmatchreward <coins>` - Change match victory payout amount\n`/addcard <rarity> <overall> [player] [specialty_title] [image_url]` - Initialize new card profile\n`/editcard <card_id> <rarity> <overall> [image_url]` - Modify precise attributes parameters on a card instance\n`/removecard <card_id>` - Delete specific card profile permanently\n`/editcoins <action> <player> <amount>` - Change balance values safely\n`/setpackprice <size> <new_price>` - Configure the purchase price of card packs\n`
     await ctx.send(embed=embed)
 
 # ==============================================================================
@@ -1334,15 +1334,16 @@ class BattleRosterSelect(discord.ui.Select):
             
         await self.view.check_draft_status(interaction)
 
-
 class AdvancedBattleArenaView(discord.ui.View):
     def __init__(self, challenger, target, c_cards, t_cards, wager):
-        super().__init__(timeout=300.0)
+        # FIXED: Set total view timeout gate wrapper tracking mechanisms
+        super().__init__(timeout=60.0)
         self.challenger = challenger
         self.target = target
         self.c_cards = c_cards
         self.t_cards = t_cards
         self.wager = wager
+        self.message = None # Bound reference hook to update the timeout message layout
         
         # Game State Variables
         self.state = "ACCEPT_PHASE"
@@ -1365,6 +1366,54 @@ class AdvancedBattleArenaView(discord.ui.View):
         self.add_item(self.accept_btn)
         self.add_item(self.decline_btn)
 
+    async def on_timeout(self):
+        """Automated referee checking loop that executes instantly if the 1-minute timer runs out."""
+        if not self.message:
+            return
+            
+        c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
+        self.clear_items()
+        
+        if self.state == "ACCEPT_PHASE":
+            embed = discord.Embed(title="⏳ Challenge Expired", description=f"The match invitation issued to {self.target.mention} was ignored for 1 minute and dissolved.", color=discord.Color.red())
+            try: await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+            
+        elif self.state == "DRAFT_PHASE":
+            embed = discord.Embed(title="⏳ Lobby Cancelled", description="Roster selection timed out. One or both players failed to draft their cards within 1 minute.", color=discord.Color.red())
+            try: await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+            
+        elif self.state == "COMBAT_PHASE":
+            # Determine who skipped casting their dice slots
+            if self.challenger_rolled and not self.target_rolled:
+                # Target player goes AFK -> Challenger wins via Forfeit (FF)
+                DATA["users"][c_id_str]["coins"] += (self.wager * 2)
+                DATA["users"][c_id_str]["wins"] += 1
+                DATA["users"][t_id_str]["losses"] += 1
+                save_data()
+                embed = discord.Embed(title="🏁 Match Settled by Forfeit", color=discord.Color.green())
+                embed.description = f"⏱️ **{self.target.display_name}** failed to roll within 60 seconds!\n\n🎉 **{self.challenger.mention}** wins by forfeit and claims the **{self.wager * 2} coins** pot jackpot!"
+                
+            elif self.target_rolled and not self.challenger_rolled:
+                # Challenger player goes AFK -> Target wins via Forfeit (FF)
+                DATA["users"][t_id_str]["coins"] += (self.wager * 2)
+                DATA["users"][t_id_str]["wins"] += 1
+                DATA["users"][c_id_str]["losses"] += 1
+                save_data()
+                embed = discord.Embed(title="🏁 Match Settled by Forfeit", color=discord.Color.green())
+                embed.description = f"⏱️ **{self.challenger.display_name}** failed to roll within 60 seconds!\n\n🎉 **{self.target.mention}** wins by forfeit and claims the **{self.wager * 2} coins** pot jackpot!"
+                
+            else:
+                # Neither player clicked roll -> Mutual cancellation refund loop triggers
+                DATA["users"][c_id_str]["coins"] += self.wager
+                DATA["users"][t_id_str]["coins"] += self.wager
+                save_data()
+                embed = discord.Embed(title="❌ Match Dissolved", description="⏱️ Neither player rolled within 60 seconds! The showdown has been cancelled and wagers have been refunded.", color=discord.Color.red())
+                
+            try: await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+
     async def accept_challenge_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.target.id:
             return await interaction.response.send_message("❌ You are not the target of this challenge card.", ephemeral=True)
@@ -1375,12 +1424,11 @@ class AdvancedBattleArenaView(discord.ui.View):
 
         self.state = "DRAFT_PHASE"
         self.clear_items()
+        self.timeout = 60.0 # Reset the 1-minute timer clock for the draft phase
         
-        # Inject the Private Dropdown Selectors
         self.add_item(BattleRosterSelect(f"👉 {self.challenger.display_name}: Select 3 Hidden Cards", self.c_cards, "challenger", c_id))
         self.add_item(BattleRosterSelect(f"👉 {self.target.display_name}: Select 3 Hidden Cards", self.t_cards, "target", t_id))
         
-        # FIXED: Completely converted to clear English
         embed = discord.Embed(title="🏟️ Arena Showdown: Roster Draft Selection", color=0xCD7F32)
         embed.description = (
             f"⚔️ **Challenge Accepted!**\n"
@@ -1400,8 +1448,8 @@ class AdvancedBattleArenaView(discord.ui.View):
         if len(self.challenger_lineup) == 3 and len(self.target_lineup) == 3:
             self.state = "COMBAT_PHASE"
             self.clear_items()
+            self.timeout = 60.0 # Reset the 1-minute timer clock for the combat loop
             
-            # Setup interactive Sync Roll Buttons
             self.roll_btn = discord.ui.Button(label="🎲 Roll Dice", style=discord.ButtonStyle.primary, row=0)
             self.roll_btn.callback = self.roll_dice_callback
             self.add_item(self.roll_btn)
@@ -1440,6 +1488,7 @@ class AdvancedBattleArenaView(discord.ui.View):
             return await interaction.response.send_message("❌ Spectators cannot interfere with arena roll gates.", ephemeral=True)
 
         if self.challenger_rolled and self.target_rolled:
+            self.timeout = 60.0 # Reset the 1-minute timer back to full for the next round slot
             await self.process_combat_round(interaction)
         else:
             await self.render_combat_screen(interaction)
@@ -1447,7 +1496,6 @@ class AdvancedBattleArenaView(discord.ui.View):
     async def process_combat_round(self, interaction: discord.Interaction):
         c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
         
-        # Deduct entry wagers only on the very first round
         if self.current_round == 1:
             if DATA["users"][c_id_str]["coins"] < self.wager or DATA["users"][t_id_str]["coins"] < self.wager:
                 self.clear_items()
@@ -1456,7 +1504,10 @@ class AdvancedBattleArenaView(discord.ui.View):
             DATA["users"][c_id_str]["coins"] -= self.wager
             DATA["users"][t_id_str]["coins"] -= self.wager
 
-        # Process exact index slot details
+        idx = self.current_round - 1
+        c_cid = self.challenger_lineup[idx]
+        t_cid = self.target_lineup[idx]
+                # Process exact index slot details
         idx = self.current_round - 1
         c_cid = self.challenger_lineup[idx]
         t_cid = self.target_lineup[idx]
@@ -1485,7 +1536,6 @@ class AdvancedBattleArenaView(discord.ui.View):
                 self.target_score += 1
                 r_winner = f"{self.target.display_name} (Direct Tiebreaker)"
 
-        # Log round results history directly to the embed framework tracker
         self.round_history_log.append(
             f"🥊 **ROUND {self.current_round} REVEAL:**\n"
             f"🏃‍♂️ {self.challenger.display_name}: **{c_card['name'].upper()}** ({c_card['overall']} OVR + {c_roll} Roll = `{c_total}`)\n"
@@ -1493,11 +1543,9 @@ class AdvancedBattleArenaView(discord.ui.View):
             f"👑 Round Winner: **{r_winner}**\n"
         )
 
-        # Reset roll condition state toggles for next slot allocations
         self.challenger_rolled = False
         self.target_rolled = False
         
-        # FIXED: Checks for an early 2-0 match knockout before deciding to progress rounds
         if self.challenger_score == 2 or self.target_score == 2:
             self.state = "END"
             self.clear_items()
@@ -1513,7 +1561,6 @@ class AdvancedBattleArenaView(discord.ui.View):
     async def finalize_arena_showdown(self, interaction: discord.Interaction):
         c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
         
-        # Calculate final league standings updates
         if self.challenger_score > self.target_score:
             champ = self.challenger
             DATA["users"][c_id_str]["coins"] += (self.wager * 2)
@@ -1525,14 +1572,11 @@ class AdvancedBattleArenaView(discord.ui.View):
             DATA["users"][t_id_str]["wins"] += 1
             DATA["users"][c_id_str]["losses"] += 1
 
-        # STAMINA SYSTEM FIXED: Only apply the 24-hour stamina lock to the cards that ACTUALLY fought!
         now_iso = datetime.now().isoformat()
         for i in range(self.current_round):
             c_cid = self.challenger_lineup[i]
             t_cid = self.target_lineup[i]
             
-            if "card_cooldowns" not in DATA["users"][c_id_str]: DATA["users"][c_id_str]["card_cooldowns"] = {}
-            # Ensure the nested dictionaries exist before trying to read them
             if "card_cooldowns" not in DATA["users"][c_id_str]: 
                 DATA["users"][c_id_str]["card_cooldowns"] = {}
             if c_cid not in DATA["users"][c_id_str]["card_cooldowns"]: 
@@ -1545,7 +1589,6 @@ class AdvancedBattleArenaView(discord.ui.View):
                 DATA["users"][t_id_str]["card_cooldowns"][t_cid] = []
             DATA["users"][t_id_str]["card_cooldowns"][t_cid].append(now_iso)
 
-        # Force synchronous remote write commit pipelines
         save_data()
 
         embed = discord.Embed(title="🏆 TBA Stadium Arena Combat: Grand Finale", color=0xFFD700)
@@ -1561,6 +1604,7 @@ class AdvancedBattleArenaView(discord.ui.View):
             inline=False
         )
         await interaction.message.edit(embed=embed, view=None)
+
 
 @bot.hybrid_command(name="challenge", description="Public Command: Wager coins and challenge another player to a 3v3 hidden card showdown")
 @app_commands.describe(opponent="The user you want to fight", wager="Coin stake value amount to bet")
@@ -1585,7 +1629,7 @@ async def challenge(ctx, opponent: discord.Member, wager: int):
     if len(c_valid) < 3 or len(t_valid) < 3:
         return await ctx.send("❌ **Battle Denied:** Both players must possess at least 3 valid cards in their inventory vaults to compete.")
 
-    # Sort layouts mapping tuples correctly
+    # FIXED DIRECT TUPLE ACCESSING
     c_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
     t_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
 
@@ -1593,7 +1637,8 @@ async def challenge(ctx, opponent: discord.Member, wager: int):
     embed.description = f"🏟️ {opponent.mention}, {ctx.author.mention} has challenged you to an arena showdown card match series!\n\n💰 **Wager Stake size:** `{wager}` coins per player (`{wager * 2}` total pot)\n\n*Click the button below to accept the match and access the hidden draft rooms.*"
     
     view = AdvancedBattleArenaView(ctx.author, opponent, c_valid, t_valid, wager)
-    await ctx.send(embed=embed, view=view)
+    view.message = await ctx.send(embed=embed, view=view)
+
 
 
 # --- Start Services ---
