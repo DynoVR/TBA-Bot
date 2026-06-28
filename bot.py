@@ -1268,18 +1268,23 @@ async def on_message_edit(before, after):
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
 # ==============================================================================
 
+# ==============================================================================
+# --- ADVANCED ROUND-BY-ROUND INTERACTIVE STADIUM Combat ENGINE ---
+# ==============================================================================
+
+# ==============================================================================
+# --- ADVANCED ROUND-BY-ROUND INTERACTIVE STADIUM Combat ENGINE ---
+# ==============================================================================
+
 class BattleRosterSelect(discord.ui.Select):
-    """Dropdown menu allowing a combatant to draft non-fatigued cards into their battle lineup."""
+    """Dropdown menu allowing a combatant to draft non-fatigued cards into their lineup."""
     def __init__(self, placeholder, valid_cards, player_side, user_id_str):
         options = []
         now = datetime.now()
         user_cooldowns = DATA["users"].get(user_id_str, {}).get("card_cooldowns", {})
 
         for cid, card, count in valid_cards[:25]:
-            # 🕰️ Check how many times this specific card ID has been used in the last 24 hours
             cooldown_timestamps = user_cooldowns.get(cid, [])
-            
-            # Filter and remove timestamps older than 24 hours out of the ledger array list
             active_cooldowns = []
             for ts_str in cooldown_timestamps:
                 try:
@@ -1289,15 +1294,9 @@ class BattleRosterSelect(discord.ui.Select):
                 except Exception:
                     continue
             
-            # Update the database layer with only the active valid remaining locks
-            if user_id_str in DATA["users"] and cid in DATA["users"][user_id_str]["card_cooldowns"]:
-                DATA["users"][user_id_str]["card_cooldowns"][cid] = active_cooldowns
-
-            # Calculate remaining uses: total copies owned minus active cooldown stamps
             uses_left = count - len(active_cooldowns)
             
             if uses_left <= 0:
-                # Card is completely fatigued and out of extra duplicate cards copies to use
                 options.append(discord.SelectOption(
                     label=f"{card['name']} ({card['overall']} OVR)",
                     description=f"❌ LOCKED: On 24-hour stamina cooldown.",
@@ -1320,122 +1319,250 @@ class BattleRosterSelect(discord.ui.Select):
         if "none" in self.values:
             return await interaction.response.send_message("❌ You don't have enough cards to battle!", ephemeral=True)
             
-        # Stop players from clicking a locked card selection option row entry
-        for selected_value in self.values:
-            if selected_value.startswith("cooldown_"):
-                return await interaction.response.send_message("❌ **Stamina Fatigue:** One or more selected cards are resting on a 24-hour cooldown lock! Rotate your roster slots.", ephemeral=True)
+        for val in self.values:
+            if val.startswith("cooldown_"):
+                return await interaction.response.send_message("❌ **Stamina Fatigue:** That card is resting on cooldown! Rotate your roster slots.", ephemeral=True)
 
         if self.player_side == "challenger" and interaction.user.id != self.view.challenger.id:
             return await interaction.response.send_message("❌ This dropdown is reserved for the challenger.", ephemeral=True)
         if self.player_side == "target" and interaction.user.id != self.view.target.id:
-            return await interaction.response.send_message("❌ This dropdown is reserved for the challenged player.", ephemeral=True)
+            return await interaction.response.send_message("❌ This dropdown is reserved for the opponent.", ephemeral=True)
 
         if self.player_side == "challenger":
             self.view.challenger_lineup = self.values
-            await interaction.response.send_message("✅ **Challenger Lineup Locked In!**", ephemeral=True)
+            await interaction.response.send_message("🔒 **Your combat roster is locked in secretly!** Ready for round allocations.", ephemeral=True)
         else:
             self.view.target_lineup = self.values
-            await interaction.response.send_message("✅ **Defender Lineup Locked In!**", ephemeral=True)
+            await interaction.response.send_message("🔒 **Your combat roster is locked in secretly!** Ready for round allocations.", ephemeral=True)
             
-        await self.view.check_battle_readiness(interaction)
+        await self.view.check_draft_status(interaction)
 
-class BattleArenaView(discord.ui.View):
+
+class AdvancedBattleArenaView(discord.ui.View):
     def __init__(self, challenger, target, c_cards, t_cards, wager):
-        super().__init__(timeout=180.0)
+        super().__init__(timeout=300.0)
         self.challenger = challenger
         self.target = target
+        self.c_cards = c_cards
+        self.t_cards = t_cards
         self.wager = wager
+        
+        # Game State Variables
+        self.state = "ACCEPT_PHASE" # ACCEPT_PHASE -> DRAFT_PHASE -> COMBAT_PHASE -> END
         self.challenger_lineup = []
         self.target_lineup = []
         
-        # Pass user IDs into the dropdowns so they can lookup individual stamina stamps
-        self.add_item(BattleRosterSelect(f"👉 {challenger.display_name}: Pick 3 Cards", c_cards, "challenger", str(challenger.id)))
-        self.add_item(BattleRosterSelect(f"👉 {target.display_name}: Pick 3 Cards", t_cards, "target", str(target.id)))
+        self.current_round = 1 # Tracks round 1, 2, 3
+        self.challenger_rolled = False
+        self.target_rolled = False
+        
+        self.challenger_score = 0
+        self.target_score = 0
+        self.round_history_log = []
 
-    async def check_battle_readiness(self, interaction: discord.Interaction):
+        # Deploy Initial Acceptance Button node
+        self.accept_btn = discord.ui.Button(label="⚔️ Accept Challenge", style=discord.ButtonStyle.success, row=0)
+        self.accept_btn.callback = self.accept_challenge_callback
+        self.decline_btn = discord.ui.Button(label="🛑 Decline Offer", style=discord.ButtonStyle.danger, row=0)
+        self.decline_btn.callback = self.decline_challenge_callback
+        self.add_item(self.accept_btn)
+        self.add_item(self.decline_btn)
+
+    async def accept_challenge_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.target.id:
+            return await interaction.response.send_message("❌ You are not the target of this challenge card.", ephemeral=True)
+            
+        c_id, t_id = str(self.challenger.id), str(self.target.id)
+        if DATA["users"][c_id]["coins"] < self.wager or DATA["users"][t_id]["coins"] < self.wager:
+            return await interaction.response.send_message("❌ **Transaction Fault:** One of the combatants no longer has enough coins.", ephemeral=True)
+
+        self.state = "DRAFT_PHASE"
+        self.clear_items()
+        
+        # Inject the Private Dropdown Selectors into the interactive row tracks
+        self.add_item(BattleRosterSelect(f"👉 {self.challenger.display_name}: Select 3 Hidden Cards", self.c_cards, "challenger", c_id))
+        self.add_item(BattleRosterSelect(f"👉 {self.target.display_name}: Select 3 Hidden Cards", self.t_cards, "target", t_id))
+        
+        embed = discord.Embed(title="🏟️ Arena Showdown: Roster Draft Selection", color=0xCD7F32)
+        embed.description = (
+            f"⚔️ **Challenge Accepted!**\n"
+            f"💰 Wager Stake Size: `{self.wager}` coins per side.\n\n"
+            f" обоих игроков просят использовать меню **выпадающего списка** ниже, чтобы тайно выбрать **3 карты** в свой боевой стек.\n"
+            f"*Cards remain completely hidden from your opponent until rolls fire!*"
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def decline_challenge_callback(self, interaction: discord.Interaction):
+        if interaction.user.id not in (self.challenger.id, self.target.id):
+            return await interaction.response.send_message("❌ You are not part of this duel.", ephemeral=True)
+        self.stop()
+        await interaction.response.edit_message(content=f"🛑 Challenge declined by {interaction.user.display_name}. Arena room dissolved.", embed=None, view=None)
+
+    async def check_draft_status(self, interaction: discord.Interaction):
         if len(self.challenger_lineup) == 3 and len(self.target_lineup) == 3:
+            self.state = "COMBAT_PHASE"
             self.clear_items()
-            await self.simulate_battle(interaction)
+            
+            # Setup interactive Sync Roll Buttons
+            self.roll_btn = discord.ui.Button(label="🎲 Roll Dice", style=discord.ButtonStyle.primary, row=0)
+            self.roll_btn.callback = self.roll_dice_callback
+            self.add_item(self.roll_btn)
+            
+            await self.render_combat_screen(interaction)
 
-    async def simulate_battle(self, interaction: discord.Interaction):
+    async def render_combat_screen(self, interaction: discord.Interaction):
+        embed = discord.Embed(title=f"🏟️ TBA Arena Showdown: Round {self.current_round} of 3", color=0xCD7F32)
+        
+        # Build status tracking strings safely
+        c_status = "🎲 READY TO ROLL" if not self.challenger_rolled else "✅ LOCKED IN"
+        t_status = "🎲 READY TO ROLL" if not self.target_rolled else "✅ LOCKED IN"
+        
+        status_tracker_board = (
+            f"🏃‍♂️ **{self.challenger.display_name}:** {c_status}\n"
+            f"🛡️ **{self.target.display_name}:** {t_status}\n\n"
+            f"💡 *Both players must click the **Roll Dice** button below to execute combat calculations for this round!*"
+        )
+        embed.description = status_tracker_board
+        
+        # Present the battle tracking ledger array history
+        if self.round_history_log:
+            embed.add_field(name="📜 Arena Combat Timeline Logs", value="\n".join(self.round_history_log), inline=False)
+            
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def roll_dice_callback(self, interaction: discord.Interaction):
+        if interaction.user.id == self.challenger.id:
+            if self.challenger_rolled:
+                return await interaction.response.send_message("❌ You have already cast your dice parameters for this round slot.", ephemeral=True)
+            self.challenger_rolled = True
+            await interaction.response.send_message("🎲 **Dice cast! Waiting on opponent...**", ephemeral=True)
+        elif interaction.user.id == self.target.id:
+            if self.target_rolled:
+                return await interaction.response.send_message("❌ You have already cast your dice parameters for this round slot.", ephemeral=True)
+            self.target_rolled = True
+            await interaction.response.send_message("🎲 **Dice cast! Waiting on challenger...**", ephemeral=True)
+        else:
+            return await interaction.response.send_message("❌ Spectators cannot interfere with arena roll gates.", ephemeral=True)
+
+        # Trigger execution math if both parties have processed rolls
+        if self.challenger_rolled and self.target_rolled:
+            await self.process_combat_round(interaction)
+        else:
+            # Re-render status strings updates
+            await self.render_combat_screen(interaction)
+
+    async def process_combat_round(self, interaction: discord.Interaction):
         c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
         
-        if DATA["users"][c_id_str]["coins"] < self.wager or DATA["users"][t_id_str]["coins"] < self.wager:
-            return await interaction.message.edit(content="❌ **Battle Cancelled:** One of the combatants spent their coins mid-draft!", embed=None, view=None)
-
-        # STAMINA CONSUMPTION: Stamp the current exact time onto the cards used in battle
-        now_iso = datetime.now().isoformat()
-        for cid in self.challenger_lineup:
-            if cid not in DATA["users"][c_id_str]["card_cooldowns"]:
-                DATA["users"][c_id_str]["card_cooldowns"][cid] = []
-            DATA["users"][c_id_str]["card_cooldowns"][cid].append(now_iso)
-
-        for cid in self.target_lineup:
-            if cid not in DATA["users"][t_id_str]["card_cooldowns"]:
-                DATA["users"][t_id_str]["card_cooldowns"][cid] = []
-            DATA["users"][t_id_str]["card_cooldowns"][cid].append(now_iso)
-
-        DATA["users"][c_id_str]["coins"] -= self.wager
-        DATA["users"][t_id_str]["coins"] -= self.wager
-
-        embed = discord.Embed(title="🏟️ TBA Arena Showdown Simulation", color=0xCD7F32)
-        embed.description = f"⚔️ **{self.challenger.display_name}** vs **{self.target.display_name}**\n💰 Total Stakes Pot: `{self.wager * 2}` Coins\n\n"
+        # Safety net balance deductions execute explicitly on Round 1 launch
+        if self.current_round == 1:
+            
+    async def process_combat_round(self, interaction: discord.Interaction):
+        c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
         
-        c_wins, t_wins = 0, 0
-        battle_log = []
+        # Safety net balance deductions execute explicitly on Round 1 launch
+        if self.current_round == 1:
+            if DATA["users"][c_id_str]["coins"] < self.wager or DATA["users"][t_id_str]["coins"] < self.wager:
+                self.clear_items()
+                return await interaction.message.edit(content="❌ **Combat Aborted:** Financial liquidity failure mid-round setup.", embed=None, view=None)
+            
+            # Stamina cooldown allocations execute securely
+            now_iso = datetime.now().isoformat()
+            for cid in self.challenger_lineup:
+                if "card_cooldowns" not in DATA["users"][c_id_str]: 
+                    DATA["users"][c_id_str]["card_cooldowns"] = {}
+                if cid not in DATA["users"][c_id_str]["card_cooldowns"]: 
+                    DATA["users"][c_id_str]["card_cooldowns"][cid] = []
+                DATA["users"][c_id_str]["card_cooldowns"][cid].append(now_iso)
+                
+            for cid in self.target_lineup:
+                if "card_cooldowns" not in DATA["users"][t_id_str]: 
+                    DATA["users"][t_id_str]["card_cooldowns"] = {}
+                if cid not in DATA["users"][t_id_str]["card_cooldowns"]: 
+                    DATA["users"][t_id_str]["card_cooldowns"][cid] = []
+                DATA["users"][t_id_str]["card_cooldowns"][cid].append(now_iso)
 
-        for round_idx in range(3):
-            c_cid = self.challenger_lineup[round_idx]
-            t_cid = self.target_lineup[round_idx]
-            c_card = DATA["global_cards"][c_cid]
-            t_card = DATA["global_cards"][t_cid]
-            
-            c_roll = random.randint(1, 20)
-            t_roll = random.randint(1, 20)
-            c_total = c_card["overall"] + c_roll
-            t_total = t_card["overall"] + t_roll
-            
-            round_winner = ""
-            if c_total > t_total:
-                c_wins += 1
-                round_winner = self.challenger.display_name
-            elif t_total > c_total:
-                t_wins += 1
-                round_winner = self.target.display_name
+            DATA["users"][c_id_str]["coins"] -= self.wager
+            DATA["users"][t_id_str]["coins"] -= self.wager
+
+        # Process exact index slot details
+        idx = self.current_round - 1
+        c_cid = self.challenger_lineup[idx]
+        t_cid = self.target_lineup[idx]
+        
+        c_card = DATA["global_cards"][c_cid]
+        t_card = DATA["global_cards"][t_cid]
+        
+        c_roll = random.randint(1, 20)
+        t_roll = random.randint(1, 20)
+        
+        c_total = c_card["overall"] + c_roll
+        t_total = t_card["overall"] + t_roll
+        
+        r_winner = ""
+        if c_total > t_total:
+            self.challenger_score += 1
+            r_winner = self.challenger.display_name
+        elif t_total > c_total:
+            self.target_score += 1
+            r_winner = self.target.display_name
+        else:
+            if random.choice([True, False]):
+                self.challenger_score += 1
+                r_winner = f"{self.challenger.display_name} (Direct Tiebreaker)"
             else:
-                if random.choice([True, False]):
-                    c_wins += 1
-                    round_winner = self.challenger.display_name + " (Tiebreaker)"
-                else:
-                    t_wins += 1
-                    round_winner = self.target.display_name + " (Tiebreaker)"
-                    
-            battle_log.append(
-                f"**ROUND {round_idx + 1}:**\n"
-                f"🏃‍♂️ {self.challenger.display_name}: {c_card['name']} ({c_card['overall']} OVR + {c_roll} Roll = **{c_total}**)\n"
-                f"🛡️ {self.target.display_name}: {t_card['name']} ({t_card['overall']} OVR + {t_roll} Roll = **{t_total}**)\n"
-                f"🏅 Winner: **{round_winner}**\n"
-            )
+                self.target_score += 1
+                r_winner = f"{self.target.display_name} (Direct Tiebreaker)"
 
-        if c_wins > t_wins:
-            winner_user = self.challenger
+        # Log round results history directly to the embed framework tracker
+        self.round_history_log.append(
+            f"🥊 **ROUND {self.current_round} REVEAL:**\n"
+            f"🏃‍♂️ {self.challenger.display_name}: **{c_card['name'].upper()}** ({c_card['overall']} OVR + {c_roll} Roll = `{c_total}`)\n"
+            f"🛡️ {self.target.display_name}: **{t_card['name'].upper()}** ({t_card['overall']} OVR + {t_roll} Roll = `{t_total}`)\n"
+            f"👑 Round Winner: **{r_winner}**\n"
+        )
+
+        # Reset roll condition state toggles for next slot allocations
+        self.challenger_rolled = False
+        self.target_rolled = False
+        
+        if self.current_round < 3:
+            self.current_round += 1
+            await self.render_combat_screen(interaction)
+        else:
+            self.state = "END"
+            self.clear_items()
+            await self.finalize_arena_showdown(interaction)
+
+    async def finalize_arena_showdown(self, interaction: discord.Interaction):
+        c_id_str, t_id_str = str(self.challenger.id), str(self.target.id)
+        
+        # Calculate final ledger winnings transfers mapping details
+        if self.challenger_score > self.target_score:
+            champ = self.challenger
             DATA["users"][c_id_str]["coins"] += (self.wager * 2)
             DATA["users"][c_id_str]["wins"] += 1
             DATA["users"][t_id_str]["losses"] += 1
         else:
-            winner_user = self.target
+            champ = self.target
             DATA["users"][t_id_str]["coins"] += (self.wager * 2)
             DATA["users"][t_id_str]["wins"] += 1
             DATA["users"][c_id_str]["losses"] += 1
 
+        # Force synchronous remote write commit pipelines
         save_data()
-        
-        embed.description += "\n".join(battle_log)
-        embed.add_field(name="🏆 ARENA CHAMPION", value=f"🎉 {winner_user.mention} wins the showdown series and claims the **{self.wager * 2} coins** pot jackpot!\n*All cards used have incurred a 24-hour stamina fatigue lock.*", inline=False)
+
+        embed = discord.Embed(title="🏆 TBA Stadium Arena Combat: Grand Finale", color=0xFFD700)
+        embed.description = "\n".join(self.round_history_log)
+        embed.add_field(
+            name="🏁 CHAMPIONSHIP AWARD DECLARATION", 
+            value=f"🎉 **{champ.display_name}** has won the showdown series block match and claimed the entire jackpot prize pool of `{self.wager * 2}` coins! 🪙\n\n*All utilized player cards have been recorded into 24-hour fatigue rest intervals.*", 
+            inline=False
+        )
         await interaction.message.edit(embed=embed, view=None)
 
 
-@bot.hybrid_command(name="challenge", description="Public Command: Wager coins and challenge another player to a 3v3 card battle showdown")
+@bot.hybrid_command(name="challenge", description="Public Command: Wager coins and challenge another player to a 3v3 hidden card showdown")
 @app_commands.describe(opponent="The user you want to fight", wager="Coin stake value amount to bet")
 async def challenge(ctx, opponent: discord.Member, wager: int):
     if opponent == ctx.author:
@@ -1455,18 +1582,16 @@ async def challenge(ctx, opponent: discord.Member, wager: int):
     c_valid = [(cid, DATA["global_cards"][cid], count) for cid, count in DATA["users"][c_id].get("inventory", {}).items() if count > 0 and cid in DATA["global_cards"]]
     t_valid = [(cid, DATA["global_cards"][cid], count) for cid, count in DATA["users"][t_id].get("inventory", {}).items() if count > 0 and cid in DATA["global_cards"]]
 
-    if len(c_valid) < 3:
-        return await ctx.send("❌ **Battle Registration Denied:** You must possess at least 3 unique cards in your vault to enter the arena.")
-    if len(t_valid) < 3:
-        return await ctx.send(f"❌ **Battle Registration Denied:** {opponent.display_name} does not hold enough cards (minimum 3) inside their vaults.")
+    if len(c_valid) < 3 or len(t_valid) < 3:
+        return await ctx.send("❌ **Battle Denied:** Both players must possess at least 3 valid cards in their inventory vaults to compete.")
 
-    c_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
-    t_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
+    c_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
+    t_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
 
     embed = discord.Embed(title="⚔️ Battle Stadium Challenge Issued!", color=0xCD7F32)
-    embed.description = f"🏟️ {opponent.mention}, **{ctx.author.mention}** has challenged you to an arena showdown card match series!\n\n💰 **Wager Stake size:** `{wager}` coins per player (`{wager * 2}` total pot)\n\n*To begin combat, both players must select exactly 3 non-fatigued combatants from their dropdown menus below.*"
+    embed.description = f"🏟️ {opponent.mention}, {ctx.author.mention} has challenged you to an arena showdown card match series!\n\n💰 **Wager Stake size:** `{wager}` coins per player (`{wager * 2}` total pot)\n\n*Click the button below to accept the match and access the hidden draft rooms.*"
     
-    view = BattleArenaView(ctx.author, opponent, c_valid, t_valid, wager)
+    view = AdvancedBattleArenaView(ctx.author, opponent, c_valid, t_valid, wager)
     await ctx.send(embed=embed, view=view)
 
 # --- Start Services ---
