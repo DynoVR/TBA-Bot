@@ -1273,14 +1273,6 @@ async def on_message_edit(before, after):
 # --- BOT RUNNER EXECUTOR (THE VERY BOTTOM OF YOUR FILE) ---
 # ==============================================================================
 
-# ==============================================================================
-# --- ADVANCED ROUND-BY-ROUND INTERACTIVE STADIUM Combat ENGINE ---
-# ==============================================================================
-
-# ==============================================================================
-# --- ADVANCED ROUND-BY-ROUND INTERACTIVE STADIUM Combat ENGINE ---
-# ==============================================================================
-
 class BattleRosterSelect(discord.ui.Select):
     """Dropdown menu allowing a combatant to draft non-fatigued cards into their lineup."""
     def __init__(self, placeholder, valid_cards, player_side, user_id_str):
@@ -1560,7 +1552,6 @@ class AdvancedBattleArenaView(discord.ui.View):
         )
         await interaction.message.edit(embed=embed, view=None)
 
-
 @bot.hybrid_command(name="challenge", description="Public Command: Wager coins and challenge another player to a 3v3 hidden card showdown")
 @app_commands.describe(opponent="The user you want to fight", wager="Coin stake value amount to bet")
 async def challenge(ctx, opponent: discord.Member, wager: int):
@@ -1584,8 +1575,9 @@ async def challenge(ctx, opponent: discord.Member, wager: int):
     if len(c_valid) < 3 or len(t_valid) < 3:
         return await ctx.send("❌ **Battle Denied:** Both players must possess at least 3 valid cards in their inventory vaults to compete.")
 
-    c_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
-    t_valid.sort(key=lambda x: (RARITY_ORDER.index(x["rarity"]) if x["rarity"] in RARITY_ORDER else 99, -x["overall"]))
+    # FIXED SORT LAYOUT: x[1] correctly grabs the inner dictionary index data so it can read keys like 'rarity' and 'overall' safely
+    c_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
+    t_valid.sort(key=lambda x: (RARITY_ORDER.index(x[1]["rarity"]) if x[1]["rarity"] in RARITY_ORDER else 99, -x[1]["overall"]))
 
     embed = discord.Embed(title="⚔️ Battle Stadium Challenge Issued!", color=0xCD7F32)
     embed.description = f"🏟️ {opponent.mention}, {ctx.author.mention} has challenged you to an arena showdown card match series!\n\n💰 **Wager Stake size:** `{wager}` coins per player (`{wager * 2}` total pot)\n\n*Click the button below to accept the match and access the hidden draft rooms.*"
