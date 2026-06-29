@@ -1849,23 +1849,23 @@ import random
 # Exact Rarity Configuration (Adjust these percentages to change your drop rates)
 WHEEL_ODDS = {
     "Bronze": {
-        "Average": 50,
-        "Great": 25,
-        "Epic": 15,
-        "Insane": 6,
-        "Pro": 3,
-        "Juggernaut": 0.8,
+        "Average": 45,
+        "Great": 40,
+        "Epic": 35,
+        "Insane": 25,
+        "Pro": 10,
+        "Juggernaut": 3,
         "Otherworldly": 0.19,
         "Specialty": 0.01
     },
     "Silver": {
         # "Average" is strictly excluded per your rules
         "Great": 45,
-        "Epic": 30,
-        "Insane": 15,
-        "Pro": 7,
-        "Juggernaut": 2.5,
-        "Otherworldly": 0.4,
+        "Epic": 40,
+        "Insane": 35,
+        "Pro": 15,
+        "Juggernaut": 5,
+        "Otherworldly": 1,
         "Specialty": 0.1
     },
     "Gold": {
