@@ -1844,6 +1844,40 @@ async def setwheelprice(ctx, wheel_tier: str, new_price: int):
     await ctx.send(embed=embed)
 
 
+import random
+
+# Exact Rarity Configuration (Adjust these percentages to change your drop rates)
+WHEEL_ODDS = {
+    "Bronze": {
+        "Average": 50,
+        "Great": 25,
+        "Epic": 15,
+        "Insane": 6,
+        "Pro": 3,
+        "Juggernaut": 0.8,
+        "Otherworldly": 0.19,
+        "Specialty": 0.01
+    },
+    "Silver": {
+        # "Average" is strictly excluded per your rules
+        "Great": 45,
+        "Epic": 30,
+        "Insane": 15,
+        "Pro": 7,
+        "Juggernaut": 2.5,
+        "Otherworldly": 0.4,
+        "Specialty": 0.1
+    },
+    "Gold": {
+        # Only Insane and higher ranks allowed
+        "Insane": 50,
+        "Pro": 30,
+        "Juggernaut": 14,
+        "Otherworldly": 5,
+        "Specialty": 1
+    }
+}
+
 @bot.hybrid_command(name="wheelspin", description="Public Command: Spend coins to buy a Bronze, Silver, or Gold prize wheel card roll")
 @app_commands.choices(wheel_tier=[
     app_commands.Choice(name="Bronze Wheel - Basic Odds", value="Bronze"),
@@ -1860,7 +1894,6 @@ async def wheelspin(ctx, wheel_tier: str):
     if "config" not in DATA: 
         DATA["config"] = {}
         
-    # FIXED CONFIG MATCHING: Both values are now forced to parse strictly as 'Bronze', 'Silver', or 'Gold'
     tier_defaults = {"Bronze": 100, "Silver": 250, "Gold": 500}
     cost = DATA["config"].get(f"wheel_{wheel_tier}_price", tier_defaults.get(wheel_tier, 100))
     
@@ -1868,22 +1901,33 @@ async def wheelspin(ctx, wheel_tier: str):
         return await ctx.send(f"❌ Store Error: Insufficient funds. The {wheel_tier} Wheel costs `{cost}` coins (Your wallet holds: `{DATA['users'][u_id]['coins']}`).")
 
     pool = []
+    weights = []
+    tier_odds = WHEEL_ODDS.get(wheel_tier, {})
+
     for cid, c in DATA["global_cards"].items():
         r = c["rarity"]
+        
+        # Enforce your wheel boundary rules
         if wheel_tier == "Silver" and r == "Average":
             continue
         elif wheel_tier == "Gold" and r in ["Average", "Great", "Epic"]:
             continue
-        pool.append((cid, c))
+            
+        # Add to matching pool if the rarity has a weight set
+        if r in tier_odds and tier_odds[r] > 0:
+            pool.append((cid, c))
+            weights.append(tier_odds[r])
 
     if not pool:
         return await ctx.send("❌ Configuration Error: No cards found matching this tier's drop filters.")
 
     DATA["users"][u_id]["coins"] -= cost
     
-    chosen_id, card = random.choice(pool)
-    DATA["users"][u_id]["inventory"][chosen_id] = DATA["users"][u_id]["inventory"].get(chosen_id, 0) + 1
+    # Securely draws 1 card tuple utilizing the relative rarity weights
+    chosen_item = random.choices(pool, weights=weights, k=1)[0]
+    chosen_id, card = chosen_item
     
+    DATA["users"][u_id]["inventory"][chosen_id] = DATA["users"][u_id]["inventory"].get(chosen_id, 0) + 1
     save_data()
 
     r_color = RARITY_COLORS.get(card['rarity'], 0x3498db)
@@ -1898,7 +1942,6 @@ async def wheelspin(ctx, wheel_tier: str):
         embed.set_image(url=card["image_url"])
         
     await ctx.send(embed=embed)
-
 
 # --- Start Services ---
 if __name__ == "__main__":
