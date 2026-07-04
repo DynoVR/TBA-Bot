@@ -790,36 +790,59 @@ async def buypack(ctx, pack_size: int):
 # --- LEDGER VAULTS MODULES ---
 # ==============================================================================
 
-    @bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
-    async def claimweekly(ctx):
-        # 1. Defer immediately to prevent "Interaction Failed" for slash commands
-        await ctx.defer()
+    @bot.hybrid_command(name="claimweekly", description="Claim your free weekly 3-card starter pack")
+async def claimweekly(ctx):
+    await ctx.defer() # Protects the connection from a 3-second database timeout crash
     
-        if not DATA["global_cards"]: 
-            return await ctx.send("❌ Empty directories.")
-            
-        u_id = str(ctx.author.id)
-        verify_user(u_id, ctx.author.display_name)
+    u_id = str(ctx.author.id)
+    verify_user(u_id, ctx.author.display_name)
+    
+    now = datetime.now()
+    user_data = DATA["users"][u_id]
+    
+    # Check if the player has a previous weekly claim timestamp saved
+    last_claim_str = user_data.get("last_weekly")
+    if last_claim_str:
+        try:
+            last_claim = datetime.fromisoformat(last_claim_str)
+            # Enforce strict 7-day cooldown tracking bounds
+            if now < last_claim + timedelta(days=7):
+                time_remaining = (last_claim + timedelta(days=7)) - now
+                days = time_remaining.days
+                hours = time_remaining.seconds // 3600
+                minutes = (time_remaining.seconds % 3600) // 60
+                return await ctx.send(f"⏳ **Reward on Cooldown:** You must wait `{days}d {hours}h {minutes}m` before claiming your next free weekly box pack!")
+        except Exception:
+            pass
+
+    # Ensure master global card directory contains valid reward loops
+    if not DATA["global_cards"]:
+        return await ctx.send("❌ **Store Error:** The master card directory catalog is currently empty.")
+
+    all_card_ids = list(DATA["global_cards"].keys())
+    pulled_cards = []
+    
+    # Dynamically draw 3 random reward cards out of your master catalog
+    for _ in range(3):
+        chosen_id = random.choice(all_card_ids)
+        user_data["inventory"][chosen_id] = user_data["inventory"].get(chosen_id, 0) + 1
+        pulled_cards.append(DATA["global_cards"][chosen_id])
+
+    # Stamp the current exact time as their new baseline check parameter
+    user_data["last_weekly"] = now.isoformat()
+    save_data()
+
+    # Build a clean visual display grid overview
+    embed = discord.Embed(title="🎁 Free Weekly Starter Box Claimed!", color=0x2ecc71)
+    embed.description = f"🎉 {ctx.author.mention}, your weekly reward box has settled successfully! The following item profiles have been deposited directly into your storage vault:\n\n"
+    
+    for c in pulled_cards:
+        r_emoji = get_rarity_emoji(c['rarity'])
+        embed.description += f"• {r_emoji} **{c['name'].upper()}** ({c['overall']} OVR - *{c['rarity']}*)\n"
         
-        now = datetime.now()
-        last = DATA["users"][u_id].get("last_weekly")
-        
-        if last and now < datetime.fromisoformat(last) + timedelta(days=7):
-            rem = (datetime.fromisoformat(last) + timedelta(days=7)) - now
-            return await ctx.send(f"⏳ Cooldown Active: Try again in {rem.days} days and {rem.seconds // 3600} hours.")
-            
-        pulled = draw_random_cards(3)
-        lines = []
-        for c_id in pulled:
-            card = DATA["global_cards"][c_id]
-            DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
-            lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
-            
-        DATA["users"][u_id]["last_weekly"] = now.isoformat()
-        
-        # 2. Build and send the final response listing the pulled cards
-        response_text = f"🎉 **{ctx.author.display_name}**, you claimed your weekly package!\n\n" + "\n".join(lines)
-        await ctx.send(response_text)
+    embed.set_footer(text="Your next free card bundle unlocks in exactly 7 days!")
+    await ctx.send(embed=embed)
+
     
 # ==============================================================================
 # --- UPGRADED COLOR ANSI LEDGER VAULTS MODULES ---
