@@ -17,7 +17,8 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "OK", 200
+    # FIXED: Returns a valid text string along with a clean 200 OK code to make cron-job.org happy
+    return "TBA Bot is Online!", 200
 
 if not hasattr(app, "_already_running"):
     app._already_running = False
@@ -25,7 +26,8 @@ if not hasattr(app, "_already_running"):
 def run_web_server():
     if app._already_running:
         return
-    port = int(os.environ.get("PORT", 8080))
+    # FIXED: Hardcoded to force port 10000 to cleanly satisfy Render's web servers
+    port = int(os.environ.get("PORT", 10000))
     try:
         app._already_running = True
         app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
@@ -33,10 +35,12 @@ def run_web_server():
         print(f"⚠️ Flask Web Server Port Bind Warning: {e}")
 
 def keep_alive():
+    # FIXED: Forces the web server to run inside an isolated background thread
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
-    
+    print("🌐 Flask Web Server successfully spun up on an isolated background thread.")
+
 # --- System Environment Configurations ---
 TOKEN = os.environ.get("DISCORD_TOKEN")
 DATABASE_FILE = "card_league_database.json"
