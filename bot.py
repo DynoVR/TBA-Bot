@@ -817,10 +817,6 @@ async def buypack(ctx, pack_size: int):
         response_text = f"🎉 **{ctx.author.display_name}**, you claimed your weekly package!\n\n" + "\n".join(lines)
         await ctx.send(response_text)
     
-
-Use code with caution.
-
-
 # ==============================================================================
 # --- UPGRADED COLOR ANSI LEDGER VAULTS MODULES ---
 # ==============================================================================
