@@ -786,30 +786,39 @@ async def buypack(ctx, pack_size: int):
 # --- LEDGER VAULTS MODULES ---
 # ==============================================================================
 
-@bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
-async def claimweekly(ctx):
-    if not DATA["global_cards"]: 
-        return await ctx.send("❌ Empty directories.")
-        
-    u_id = str(ctx.author.id)
-    verify_user(u_id, ctx.author.display_name)
+    @bot.hybrid_command(name="claimweekly", description="Public Command: Claim free weekly card starter drop package")
+    async def claimweekly(ctx):
+        # 1. Defer immediately to prevent "Interaction Failed" for slash commands
+        await ctx.defer()
     
-    now = datetime.now()
-    last = DATA["users"][u_id].get("last_weekly")
+        if not DATA["global_cards"]: 
+            return await ctx.send("❌ Empty directories.")
+            
+        u_id = str(ctx.author.id)
+        verify_user(u_id, ctx.author.display_name)
+        
+        now = datetime.now()
+        last = DATA["users"][u_id].get("last_weekly")
+        
+        if last and now < datetime.fromisoformat(last) + timedelta(days=7):
+            rem = (datetime.fromisoformat(last) + timedelta(days=7)) - now
+            return await ctx.send(f"⏳ Cooldown Active: Try again in {rem.days} days and {rem.seconds // 3600} hours.")
+            
+        pulled = draw_random_cards(3)
+        lines = []
+        for c_id in pulled:
+            card = DATA["global_cards"][c_id]
+            DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
+            lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
+            
+        DATA["users"][u_id]["last_weekly"] = now.isoformat()
+        
+        # 2. Build and send the final response listing the pulled cards
+        response_text = f"🎉 **{ctx.author.display_name}**, you claimed your weekly package!\n\n" + "\n".join(lines)
+        await ctx.send(response_text)
     
-    if last and now < datetime.fromisoformat(last) + timedelta(days=7):
-        rem = (datetime.fromisoformat(last) + timedelta(days=7)) - now
-        return await ctx.send(f"⏳ Cooldown Active: Try again in {rem.days} days and {rem.seconds // 3600} hours.")
-        
-    pulled = draw_random_cards(3)
-    lines = []
-    for c_id in pulled:
-        card = DATA["global_cards"][c_id]
-        DATA["users"][u_id]["inventory"][c_id] = DATA["users"][u_id]["inventory"].get(c_id, 0) + 1
-        lines.append(f"🎁 [{card['rarity']}] {card['name']} ({card['overall']} OVR)")
-        
-    DATA["users"][u_id]["last_weekly"] = now.isoformat()
 
+Use code with caution.
 
 
 # ==============================================================================
