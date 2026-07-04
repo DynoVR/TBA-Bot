@@ -1948,6 +1948,160 @@ async def wheelspin(ctx, wheel_tier: str):
         
     await ctx.send(embed=embed)
 
+# ==============================================================================
+# --- THE GUESSING GAUNTLET: HIGHER OR LOWER CARD GAME ---
+# ==============================================================================
+
+class GuessingGauntletView(discord.ui.View):
+    def __init__(self, player, current_card_id, wager):
+        super().__init__(timeout=60.0)
+        self.player = player
+        self.current_card_id = current_card_id
+        self.wager = wager
+        self.multiplier = 1.0
+        self.streak = 0
+        self.message = None
+
+    async def on_timeout(self):
+        if self.message:
+            u_id_str = str(self.player.id)
+            # Automatic cash out on timeout to protect user coins
+            final_payout = int(self.wager * self.multiplier)
+            if self.streak > 0:
+                DATA["users"][u_id_str]["coins"] += final_payout
+                save_data()
+                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, you took too long to guess! The referee automatically cashed you out with your streak multiplier.\n\n💰 **Final Payout:** `{final_payout}` coins 🪙", color=discord.Color.orange())
+            else:
+                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, your game timed out before making any guesses. Your initial wager has been lost.", color=discord.Color.red())
+            try: await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+
+    def make_game_embed(self, next_card_reveal=None, result_text=""):
+        card = DATA["global_cards"][self.current_card_id]
+        r_color = RARITY_COLORS.get(card['rarity'], 0x3498db)
+        r_emoji = get_rarity_emoji(card['rarity'])
+        
+        embed = discord.Embed(title="🎯 The Guessing Gauntlet", color=r_color)
+        embed.description = f"👤 **Player:** {self.player.mention}\n💰 **Initial Wager:** `{self.wager}` coins\n📈 **Current Multiplier:** `{self.multiplier:.1f}x`\n🔥 **Current Win Streak:** `{self.streak}` rounds\n💵 **Current Value if Cashed Out:** `{int(self.wager * self.multiplier)}` coins\n\n"
+        
+        if result_text:
+            embed.description += f"{result_text}\n\n"
+
+        embed.add_field(
+            name="🎴 CURRENT CARD ON THE BOARD",
+            value=f"```\nNAME:    {card['name'].upper()}\nOVERALL: {card['overall']} OVR\nRARITY:  {card['rarity']}\n```",
+            inline=False
+        )
+        
+        embed.set_footer(text="Will the next card drawn from the catalog be HIGHER or LOWER OVR?")
+        if card.get("image_url"):
+            embed.set_thumbnail(url=card["image_url"])
+        return embed
+
+    async def process_guess(self, interaction: discord.Interaction, guess: str):
+        if interaction.user.id != self.player.id:
+            return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
+
+        self.timeout = 60.0
+        u_id_str = str(self.player.id)
+        
+        # Draw the next random target card from the catalog
+        all_card_ids = list(DATA["global_cards"].keys())
+        next_card_id = random.choice(all_card_ids)
+        
+        current_card = DATA["global_cards"][self.current_card_id]
+        next_card = DATA["global_cards"][next_card_id]
+        
+        curr_ovr = current_card["overall"]
+        next_ovr = next_card["overall"]
+        
+        next_emoji = get_rarity_emoji(next_card['rarity'])
+        reveal_string = f"📋 **Drawn Card:** {next_emoji} **{next_card['name'].upper()}** (`{next_ovr} OVR` - {next_card['rarity']})"
+
+        # Handle exact tie scenario based on custom request
+        if next_ovr == curr_ovr:
+            result_text = f"⚖️ **ROUND TIE!** {reveal_string}\nBoth cards share the exact same `{next_ovr}` OVR rating. No multiplier gains or wager losses incurred!"
+            self.current_card_id = next_card_id
+            return await interaction.response.edit_message(embed=self.make_game_embed(result_text=result_text), view=self)
+
+        # Check win/loss parameters
+        is_win = False
+        if guess == "higher" and next_ovr > curr_ovr:
+            is_win = True
+        elif guess == "lower" and next_ovr < curr_ovr:
+            is_win = True
+
+        if is_win:
+            self.streak += 1
+            # Add dynamic incremental scale multiplier additions
+            self.multiplier += 0.4
+            result_text = f"✅ **CORRECT!** {reveal_string}\nYour win streak increases! Multiplier increased to `{self.multiplier:.1f}x`."
+            self.current_card_id = next_card_id
+            await interaction.response.edit_message(embed=self.make_game_embed(result_text=result_text), view=self)
+        else:
+            # Player guessed incorrectly -> Wager fully consumed
+            self.clear_items()
+            self.stop()
+            result_text = f"❌ **WRONG GUESS!** {reveal_string}\nYou guessed `{guess.upper()}` but the card layout broke your streak chain. Your wager has been lost!"
+            embed = discord.Embed(title="💀 Gauntlet Broken", description=result_text, color=discord.Color.red())
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label="🔼 Higher", style=discord.ButtonStyle.primary, row=0)
+    async def higher_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_guess(interaction, "higher")
+
+    @discord.ui.button(label="🔽 Lower", style=discord.ButtonStyle.secondary, row=0)
+    async def lower_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_guess(interaction, "lower")
+
+    @discord.ui.button(label="🏦 Cash Out", style=discord.ButtonStyle.success, row=0)
+    async def cash_out_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.player.id:
+            return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
+            
+        if self.streak == 0:
+            return await interaction.response.send_message("❌ You must win at least 1 round successfully before cashing out!", ephemeral=True)
+
+        self.clear_items()
+        self.stop()
+        
+        u_id_str = str(self.player.id)
+        final_winnings = int(self.wager * self.multiplier)
+        
+        # Credit wallet profits cleanly
+        DATA["users"][u_id_str]["coins"] += final_winnings
+        save_data()
+        
+        embed = discord.Embed(title="🏦 Vault Cash Out Successful!", color=discord.Color.green())
+        embed.description = f"🎉 {self.player.mention} decided to walk away with their earnings!\n\n🔥 **Final Streak:** `{self.streak}` rounds\n📈 **Final Multiplier:** `{self.multiplier:.1f}x`\n💰 **Total Payout Returned:** `{final_winnings}` coins 🪙"
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
+@bot.hybrid_command(name="gauntlet", description="Public Command: Wager coins on a card higher-or-lower guessing game streak")
+@app_commands.describe(wager="Coin stake value amount to bet")
+async def gauntlet(ctx, wager: int):
+    if not DATA["global_cards"]: 
+        return await ctx.send("❌ Error: Master blueprint records are empty.")
+    if wager <= 0:
+        return await ctx.send("❌ Input Error: Your wager amount parameters must be greater than 0.")
+
+    u_id_str = str(ctx.author.id)
+    verify_user(u_id_str, ctx.author.display_name)
+    
+    if DATA["users"][u_id_str]["coins"] < wager:
+        return await ctx.send(f"❌ Store Error: Insufficient funds. Your wallet holds: `{DATA['users'][u_id_str]['coins']}` coins.")
+
+    # Deduct upfront wager safely out of local memory tracks
+    DATA["users"][u_id_str]["coins"] -= wager
+    save_data()
+
+    # Draw starter base setup card target completely at random from catalog
+    all_card_ids = list(DATA["global_cards"].keys())
+    starter_card_id = random.choice(all_card_ids)
+
+    view = GuessingGauntletView(ctx.author, starter_card_id, wager)
+    view.message = await ctx.send(embed=view.make_game_embed(), view=view)
+
 # --- Start Services ---
 if __name__ == "__main__":
     keep_alive()
