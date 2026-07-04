@@ -2076,9 +2076,8 @@ class GuessingGauntletView(discord.ui.View):
         embed.description = f"🎉 {self.player.mention} decided to walk away with their earnings!\n\n🔥 **Final Streak:** `{self.streak}` rounds\n📈 **Final Multiplier:** `{self.multiplier:.1f}x`\n💰 **Total Payout Returned:** `{final_winnings}` coins 🪙"
         await interaction.response.edit_message(embed=embed, view=None)
 
-
-@bot.hybrid_command(name="gauntlet", description="Public Command: Wager coins on a card higher-or-lower guessing game streak")
-@app_commands.describe(wager="Coin stake value amount to bet")
+@bot.hybrid_command(name="gauntlet", description="Wager coins on a card higher or lower game streak")
+@app_commands.describe(wager="Amount of coins to bet")
 async def gauntlet(ctx, wager: int):
     if not DATA["global_cards"]: 
         return await ctx.send("❌ Error: Master blueprint records are empty.")
