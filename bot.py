@@ -754,8 +754,6 @@ def draw_random_cards(count: int) -> list:
         
     return drawn
 
-
-
 @bot.hybrid_command(name="buypack", description="Public Command: Spend coins to draw player items packs")
 @app_commands.choices(pack_size=[
     app_commands.Choice(name="3 Players", value=3), 
