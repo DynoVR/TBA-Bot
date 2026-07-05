@@ -1972,10 +1972,6 @@ async def wheelspin(ctx, wheel_tier: str):
 # --- THE GUESSING GAUNTLET: HIGHER OR LOWER CARD GAME ---
 # ==============================================================================
 
-# ==============================================================================
-# --- THE GUESSING GAUNTLET: HIGH-ROLLER TIMED MULTIPLIER ENGINE ---
-# ==============================================================================
-
 class GuessingGauntletView(discord.ui.View):
     def __init__(self, player, current_card_id, wager):
         super().__init__(timeout=60.0)
@@ -2095,14 +2091,14 @@ class GuessingGauntletView(discord.ui.View):
     async def lower_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.process_guess(interaction, "lower")
 
-    @discord.ui.button(label="🏦 Cash Out", style=discord.ButtonStyle.success, row=0)
+        @discord.ui.button(label="🏦 Cash Out", style=discord.ButtonStyle.success, row=0)
     async def cash_out_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.player.id:
             return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
             
-        # FIXED: Strictly blocks the cash out if they haven't completed Round 2
-        if self.streak == 2:
-            return await interaction.response.send_message("❌ **Ref Injunction:** You cannot cash out yet! You must guess correctly on the first round card first.", ephemeral=True)
+        # FIXED: Changed self.streak == 0 to self.streak < 2 to force a minimum 2-round win streak rule
+        if self.streak < 2:
+            return await interaction.response.send_message("❌ **Ref Injunction:** You cannot cash out yet! You must guess correctly on at least **2 rounds** in a row first.", ephemeral=True)
 
         self.clear_items()
         self.stop()
@@ -2116,7 +2112,6 @@ class GuessingGauntletView(discord.ui.View):
         embed = discord.Embed(title="🏦 Vault Cash Out Successful!", color=discord.Color.green())
         embed.description = f"🎉 {self.player.mention} decided to walk away with their earnings!\n\n🔥 **Final Streak:** `{self.streak}` rounds\n📈 **Final Multiplier:** `{self.multiplier:.1f}x`\n💰 **Total Payout Returned:** `{final_winnings}` coins 🪙"
         await interaction.response.edit_message(embed=embed, view=None)
-
 
 @bot.hybrid_command(name="gauntlet", description="Wager coins on a card higher or lower game streak")
 @app_commands.describe(wager="Amount of coins to bet")
