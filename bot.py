@@ -788,7 +788,7 @@ async def buypack(ctx, pack_size: int):
 # --- LEDGER VAULTS MODULES ---
 # ==============================================================================
 
-   @bot.hybrid_command(name="claimweekly", description="Claim your free weekly 3-card starter pack")
+@bot.hybrid_command(name="claimweekly", description="Claim your free weekly 3-card starter pack")
 async def claimweekly(ctx):
     await ctx.defer()
     
