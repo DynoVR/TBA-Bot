@@ -1981,24 +1981,27 @@ class GuessingGauntletView(discord.ui.View):
         self.streak = 0
         self.message = None
         
-        # FIXED: If wagering 200+ coins, baseline multiplier starts at 1.2x instead of 1.0x
         if wager >= 200:
             self.multiplier = 1.2
-            self.increment = 0.2  # Scales cleanly: 1.2 -> 1.4 -> 1.6
+            self.increment = 0.2  
         else:
             self.multiplier = 1.0
-            self.increment = 0.4  # Standard scale: 1.0 -> 1.4 -> 1.8
+            self.increment = 0.4  
+
+        # 🛠️ HARD RESOLUTION LOCK: Initialize the Cash Out button but don't add it to the view yet
+        self.cash_out_button_node = discord.ui.Button(label="🏦 Cash Out", style=discord.ButtonStyle.success, row=0)
+        self.cash_out_button_node.callback = self.cash_out_btn_callback
 
     async def on_timeout(self):
         if self.message:
             u_id_str = str(self.player.id)
             final_payout = int(self.wager * self.multiplier)
-            if self.streak > 0:
+            if self.streak >= 2: # Protected fallback check
                 DATA["users"][u_id_str]["coins"] += final_payout
                 save_data()
-                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, you took too long to guess! The referee automatically cashed you out with your streak multiplier.\n\n💰 **Final Payout:** `{final_payout}` coins 🪙", color=discord.Color.orange())
+                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, you took too long to guess! The referee automatically cashed you out.\n\n💰 **Final Payout:** `{final_payout}` coins 🪙", color=discord.Color.orange())
             else:
-                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, your game timed out before making any guesses. Your initial wager has been lost.", color=discord.Color.red())
+                embed = discord.Embed(title="⏳ Gauntlet Timed Out", description=f"{self.player.mention}, your game timed out before hitting your 2-round win streak minimum milestone. Initial wager lost.", color=discord.Color.red())
             try: await self.message.edit(embed=embed, view=None)
             except Exception: pass
 
@@ -2008,8 +2011,6 @@ class GuessingGauntletView(discord.ui.View):
         r_emoji = get_rarity_emoji(card['rarity'])
         
         embed = discord.Embed(title="🎯 The Guessing Gauntlet", color=r_color)
-        
-        # Highlight high-roller status inside the display card template
         high_roller_tag = "🔥 **HIGH-ROLLER MATCH ACTIVE**\n" if self.wager >= 200 else ""
         
         embed.description = (
@@ -2018,7 +2019,7 @@ class GuessingGauntletView(discord.ui.View):
             f"{high_roller_tag}"
             f"📈 **Current Multiplier:** `{self.multiplier:.1f}x`\n"
             f"🔥 **Current Win Streak:** `{self.streak}` rounds\n"
-            f"💵 **Current Value if Cashed Out:** `{int(self.wager * self.multiplier)}` coins\n\n"
+            f"💵 **Value if Cashed Out:** `{int(self.wager * self.multiplier)}` coins\n\n"
         )
         
         if result_text:
@@ -2030,9 +2031,8 @@ class GuessingGauntletView(discord.ui.View):
             inline=False
         )
         
-        # FIXED: Clear English instructions alerting players they are locked into Round 1
-        if self.streak == 0:
-            embed.set_footer(text="🔒 Cash out locked. You must correctly survive Round 1 before cashing out!")
+        if self.streak < 2:
+            embed.set_footer(text=f"🔒 Cash out locked. You must correctly survive {2 - self.streak} more round(s) before cashing out!")
         else:
             embed.set_footer(text="Will the next card drawn from the catalog be HIGHER or LOWER OVR?")
             
@@ -2045,7 +2045,6 @@ class GuessingGauntletView(discord.ui.View):
             return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
 
         self.timeout = 60.0
-        
         all_card_ids = list(DATA["global_cards"].keys())
         next_card_id = random.choice(all_card_ids)
         
@@ -2059,22 +2058,24 @@ class GuessingGauntletView(discord.ui.View):
         reveal_string = f"📋 **Drawn Card:** {next_emoji} **{next_card['name'].upper()}** (`{next_ovr} OVR` - {next_card['rarity']})"
 
         if next_ovr == curr_ovr:
-            result_text = f"⚖️ **ROUND TIE!** {reveal_string}\nBoth cards share the exact same `{next_ovr}` OVR rating. No multiplier gains or wager losses incurred!"
+            result_text = f"⚖️ **ROUND TIE!** {reveal_string}\nBoth cards share the exact same `{next_ovr}` OVR rating. No losses incurred!"
             self.current_card_id = next_card_id
             return await interaction.response.edit_message(embed=self.make_game_embed(result_text=result_text), view=self)
 
         is_win = False
-        if guess == "higher" and next_ovr > curr_ovr:
-            is_win = True
-        elif guess == "lower" and next_ovr < curr_ovr:
-            is_win = True
+        if guess == "higher" and next_ovr > curr_ovr: is_win = True
+        elif guess == "lower" and next_ovr < curr_ovr: is_win = True
 
         if is_win:
             self.streak += 1
-            # Adds the dynamic increment scale (+0.2 for high-rollers, +0.4 for standard match brackets)
             self.multiplier += self.increment
             result_text = f"✅ **CORRECT!** {reveal_string}\nYour win streak increases! Multiplier increased to `{self.multiplier:.1f}x`."
             self.current_card_id = next_card_id
+            
+            # FIXED: Dynamically append the Cash Out button option only when streak criteria is met
+            if self.streak == 2 and self.cash_out_button_node not in self.children:
+                self.add_item(self.cash_out_button_node)
+                
             await interaction.response.edit_message(embed=self.make_game_embed(result_text=result_text), view=self)
         else:
             self.clear_items()
@@ -2091,14 +2092,13 @@ class GuessingGauntletView(discord.ui.View):
     async def lower_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.process_guess(interaction, "lower")
 
-        @discord.ui.button(label="🏦 Cash Out", style=discord.ButtonStyle.success, row=0)
-    async def cash_out_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def cash_out_btn_callback(self, interaction: discord.Interaction):
+        """Hidden execution handler that handles the final settlement."""
         if interaction.user.id != self.player.id:
             return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
             
-        # FIXED: Changed self.streak == 0 to self.streak < 2 to force a minimum 2-round win streak rule
         if self.streak < 2:
-            return await interaction.response.send_message("❌ **Ref Injunction:** You cannot cash out yet! You must guess correctly on at least **2 rounds** in a row first.", ephemeral=True)
+            return await interaction.response.send_message("❌ **Ref Injunction:** Cash out unavailable.", ephemeral=True)
 
         self.clear_items()
         self.stop()
