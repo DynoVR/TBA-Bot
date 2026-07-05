@@ -2101,7 +2101,7 @@ class GuessingGauntletView(discord.ui.View):
             return await interaction.response.send_message("❌ This game matrix belongs to another player.", ephemeral=True)
             
         # FIXED: Strictly blocks the cash out if they haven't completed Round 2
-        if self.streak == 0:
+        if self.streak == 2:
             return await interaction.response.send_message("❌ **Ref Injunction:** You cannot cash out yet! You must guess correctly on the first round card first.", ephemeral=True)
 
         self.clear_items()
