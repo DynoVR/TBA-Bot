@@ -501,21 +501,20 @@ async def removecard(ctx, card_id: str):
     app_commands.Choice(name="Take Coins", value="take")
 ])
 async def editcoins(ctx, action: str, player: discord.Member, amount: int):
+    # FIXED: Defers the response instantly to prevent the 3-second timeout crash while saving to cloud
+    await ctx.defer()
+    
     if amount <= 0:
         return await ctx.send("❌ **Input Error:** The coin adjustment amount parameters must be greater than 0.")
         
     user_id_str = str(player.id)
-    
-    # Securely verify that the user profile registry structure exists in memory
     verify_user(user_id_str, player.display_name)
-    
     current_coins = DATA["users"][user_id_str].get("coins", 150)
     
     if action == "give":
         DATA["users"][user_id_str]["coins"] = current_coins + amount
         message_response = f"🪙 **Coins Deposited!** Successfully credited `+{amount}` coins to {player.mention}."
     elif action == "take":
-        # Safe constraint boundary check to prevent negative wallet values
         if current_coins < amount:
             new_balance = 0
             message_response = f"⚠️ **Balance Warning:** Deducted all coins from {player.mention} as their vault held less than `{amount}`."
@@ -525,14 +524,14 @@ async def editcoins(ctx, action: str, player: discord.Member, amount: int):
             
         DATA["users"][user_id_str]["coins"] = new_balance
 
-    # Force synchronous live write backup pipeline syncs
+    # This is the cloud network save call that was causing the 3-second timeout
     save_data()
     
-    # Construct a clean embed summary overview display layout
     embed = discord.Embed(title="🏦 Vault Balance Adjusted", description=message_response, color=0xFFD700)
     embed.add_field(name="New Vault Total Balance", value=f"`{DATA['users'][user_id_str]['coins']}` coins 🪙", inline=False)
     embed.set_footer(text=f"Transaction audited and authorized by {ctx.author.display_name}")
     
+    # Use followups/context send safely after deferrals
     await ctx.send(embed=embed)
 
 
@@ -2139,7 +2138,7 @@ async def gauntlet(ctx, wager: int):
     view.message = await ctx.send(embed=view.make_game_embed(), view=view)
 
 # ==============================================================================
-# --- PERFORMANCE ANIMATED CARD ROULETTE ENGINE ---
+# --- PERFORMANCE SPEED TEXT TICKER ROULETTE ENGINE ---
 # ==============================================================================
 
 class CardRouletteView(discord.ui.View):
@@ -2152,26 +2151,39 @@ class CardRouletteView(discord.ui.View):
         self.is_stopped = False
         self.message = None
 
-    def make_roulette_embed(self, title_text="🎡 PRIZE WHEEL ACTIVE...", final_result=""):
+    def make_roulette_embed(self, title_text="🎰 ROULETTE WHEEL ACTIVE...", ticker_line=""):
         embed = discord.Embed(title=title_text, color=0x3498db)
         embed.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n"
         
         if not self.is_stopped:
-            # High-speed continuous looping spinning wheel graphic asset
-            spinning_wheel_gif = "https://discordapp.net"
-
-            
+            # Displays the real-time calculated sliding text sequence tape bar frame
+            current_ticker = ticker_line if ticker_line else "⚡ [  🟦  🟪  🟩  🔮  👑  🔥  🌋  🌟  ]"
             embed.description += (
-                f"🎰 **THE WHEEL IS SPINNING AT MAXIMUM SPEEDS!**\n"
+                f"🎰 **THE WHEEL IS WHIRLING AT HIGH SPEEDS:**\n"
+                f"```\n{current_ticker}\n```\n"
                 f"💥 *Mashing the blue button below instantly forces the braking system to split the active prize deck!*"
             )
-            embed.set_image(url=spinning_wheel_gif)
             embed.set_footer(text="⏱️ Tap STOP right now to lock in your prize card location!")
-        else:
-            embed.description += f"{final_result}\n\n"
-            embed.set_footer(text="Game finished. Spin again to push your luck!")
-            
         return embed
+
+    async def animate_ticker_start(self):
+        """Generates an initial high-speed real-time sliding text illusion safely within rate limits."""
+        frames = [
+            "⚡ [ ➡️🟦  🟪  🟩  🔮  👑  🔥  🌋  🌟 ]",
+            "⚡ [  🟦  ➡️🟪  🟩  🔮  👑  🔥  🌋  🌟 ]",
+            "⚡ [  🟦  🟪  ➡️🟩  🔮  👑  🔥  🌋  🌟 ]",
+            "⚡ [  🟦  🟪  🟩  ➡️🔮  👑  🔥  🌋  🌟 ]",
+            "⚡ [  🟦  🟪  🟩  🔮  ➡️👑  🔥  🌋  🌟 ]"
+        ]
+        # Loops frames rapidly on boot up sequence tracks
+        for frame in frames:
+            if self.is_stopped: 
+                break
+            try:
+                await self.message.edit(embed=self.make_roulette_embed(ticker_line=frame), view=self)
+                await asyncio.sleep(0.2) # Fast 200ms refresh rate tick
+            except Exception:
+                break
 
     @discord.ui.button(label="🛑 STOP THE WHEEL!", style=discord.ButtonStyle.primary, row=0)
     async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2198,7 +2210,6 @@ class CardRouletteView(discord.ui.View):
         }
         winnings = payout_map.get(rarity, 0)
         
-        # Credit user wallet with flat winnings payout
         DATA["users"][u_id_str]["coins"] += winnings
         save_data()
         
@@ -2279,6 +2290,9 @@ async def roulette(ctx, mode: str):
 
     view = CardRouletteView(ctx.author, cost, weighted_pool, mode)
     view.message = await ctx.send(embed=view.make_roulette_embed(), view=view)
+    
+    # Safely fires the background layout thread runner tasks
+    bot.loop.create_task(view.animate_ticker_start())
 
 # --- Start Services ---
 if __name__ == "__main__":
