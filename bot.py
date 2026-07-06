@@ -2138,6 +2138,168 @@ async def gauntlet(ctx, wager: int):
     view = GuessingGauntletView(ctx.author, starter_card_id, wager)
     view.message = await ctx.send(embed=view.make_game_embed(), view=view)
 
+# ==============================================================================
+# --- REBUILT HIGH-SPEED CARD ROULETTE STADIUM ENGINE ---
+# ==============================================================================
+
+class CardRouletteView(discord.ui.View):
+    def __init__(self, player, wager, pool, wheel_type):
+        super().__init__(timeout=30.0)
+        self.player = player
+        self.wager = wager
+        self.pool = pool 
+        self.wheel_type = wheel_type
+        self.current_card_id = random.choice(pool)
+        self.is_stopped = False
+        self.message = None
+
+    def make_roulette_embed(self, title_text="⚡ SHUFFLING DECK MATRIX...", final_result=""):
+        card = DATA["global_cards"][self.current_card_id]
+        r_color = RARITY_COLORS.get(card['rarity'], 0x3498db)
+        r_emoji = get_rarity_emoji(card['rarity'])
+        
+        embed = discord.Embed(title=title_text, color=r_color)
+        embed.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n"
+        
+        if final_result:
+            embed.description += f"{final_result}\n\n"
+            
+        embed.add_field(
+            name=f"{r_emoji} CURRENT POSITION",
+            value=f"```\nNAME:    {card['name'].upper()}\nOVERALL: {card['overall']} OVR\nRARITY:  {card['rarity']}\n```",
+            inline=False
+        )
+        
+        if not self.is_stopped:
+            embed.set_footer(text="⏱️ Tap the STOP button below right now to lock in your prize card!")
+        else:
+            embed.set_footer(text="Game finished. Spin again to push your luck!")
+            
+        if card.get("image_url"):
+            embed.set_thumbnail(url=card["image_url"])
+        return embed
+
+    async def run_shuffle_loop(self):
+        while not self.is_stopped:
+            await asyncio.sleep(0.3) 
+            if self.is_stopped:
+                break
+            
+            self.current_card_id = random.choice(self.pool)
+            try:
+                await self.message.edit(embed=self.make_roulette_embed())
+            except Exception:
+                self.stop()
+                break
+
+    @discord.ui.button(label="🛑 STOP THE WHEEL!", style=discord.ButtonStyle.primary, row=0)
+    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.player.id:
+            return await interaction.response.send_message("❌ This roulette table belongs to another user.", ephemeral=True)
+            
+        if self.is_stopped:
+            return await interaction.response.defer()
+
+        self.is_stopped = True
+        self.clear_items()
+        self.stop()
+        
+        u_id_str = str(self.player.id)
+        card = DATA["global_cards"][self.current_card_id]
+        rarity = card["rarity"]
+        
+        # FIXED: Exact flat coin payout table metrics from your request
+        payout_map = {
+            "Average": 0,
+            "Great": 10,
+            "Epic": 25,
+            "Insane": 75,
+            "Pro": 125,
+            "Juggernaut": 175,
+            "Otherworldly": 250,
+            "Specialty": 500
+        }
+        winnings = payout_map.get(rarity, 0)
+        
+        # Credit user wallet with flat winnings payout
+        DATA["users"][u_id_str]["coins"] += winnings
+        save_data()
+        
+        if winnings > 0:
+            result_string = f"🎉 **LANDED!** The wheel stopped on a **{rarity.upper()}** card!\n💰 **Winnings Payout:** `+{winnings}` coins deposited! 🪙"
+        else:
+            result_string = f"💀 **BUSTED!** The wheel stopped on an **AVERAGE** card slot.\n💰 **Winnings Payout:** `0` coins returned. Better luck next spin!"
+
+        embed = self.make_roulette_embed(title_text="🏁 CARD ROULETTE SETTLED", final_result=result_string)
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    async def on_timeout(self):
+        if not self.is_stopped:
+            self.is_stopped = True
+            self.clear_items()
+            try:
+                embed = discord.Embed(title="⏳ Roulette Timeout", description=f"{self.player.mention}, you took too long to hit STOP. The wheel locked up and the entry cost was lost.", color=discord.Color.red())
+                await self.message.edit(embed=embed, view=None)
+            except Exception: pass
+
+
+@bot.hybrid_command(name="roulette", description="Spend coins on a high speed card roulette flashing wheel")
+@app_commands.choices(mode=[
+    app_commands.Choice(name="Standard Wheel (25 coins) - Basic Drop Rates", value="Standard"),
+    app_commands.Choice(name="High-Roll Wheel (50 coins) - No Average Cards / Better Odds!", value="High-Roll")
+])
+async def roulette(ctx, mode: str):
+    if not DATA["global_cards"]: 
+        return await ctx.send("❌ Error: Master card matrix records are empty.")
+
+    u_id_str = str(ctx.author.id)
+    verify_user(u_id_str, ctx.author.display_name)
+    
+    # Establish dynamic cost mapping
+    cost = 25 if mode == "Standard" else 50
+    
+    if DATA["users"][u_id_str]["coins"] < cost:
+        return await ctx.send(f"❌ Store Error: Insufficient coins. A {mode} spin costs `{cost}` coins (Your wallet: `{DATA['users'][u_id_str]['coins']}`).")
+
+    # Deduct spin entrance fee upfront safely
+    DATA["users"][u_id_str]["coins"] -= cost
+    save_data()
+
+    all_card_ids = list(DATA["global_cards"].keys())
+    weighted_pool = []
+
+    # FIXED ODDRATE BALANCING MAPPING
+    for cid in all_card_ids:
+        r = DATA["global_cards"][cid]["rarity"]
+        
+        if mode == "Standard":
+            # Baseline probabilities weighting slots (Rarer cards = way less duplicates)
+            if r == "Average": weighted_pool.extend([cid] * 15)
+            elif r == "Great": weighted_pool.extend([cid] * 10)
+            elif r == "Epic": weighted_pool.extend([cid] * 6)
+            elif r == "Insane": weighted_pool.extend([cid] * 4)
+            elif r == "Pro": weighted_pool.extend([cid] * 2)
+            else: weighted_pool.append(cid) # Juggernaut, Otherworldly, Specialty are ultra rare single counts
+            
+        elif mode == "High-Roll":
+            # HIGH PROBABILITY WHEEL: Completely discards 'Average' cards from the list
+            if r == "Average": continue 
+            elif r == "Great": weighted_pool.extend([cid] * 8)
+            elif r == "Epic": weighted_pool.extend([cid] * 6)
+            elif r == "Insane": weighted_pool.extend([cid] * 5)
+            elif r == "Pro": weighted_pool.extend([cid] * 3)
+            elif r == "Juggernaut": weighted_pool.extend([cid] * 2)
+            else: weighted_pool.append(cid) # Otherworldly and Specialty remain top chase prizes
+
+    if not weighted_pool:
+        return await ctx.send("❌ Configuration Error: No cards found matching this wheel's drop rules.")
+
+    view = CardRouletteView(ctx.author, cost, weighted_pool, mode)
+    view.message = await ctx.send(embed=view.make_roulette_embed(), view=view)
+    
+    # Fire background task thread loop
+    bot.loop.create_task(view.run_shuffle_loop())
+
 # --- Start Services ---
 if __name__ == "__main__":
     keep_alive()
