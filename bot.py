@@ -2158,7 +2158,8 @@ class CardRouletteView(discord.ui.View):
         
         if not self.is_stopped:
             # High-speed continuous looping spinning wheel graphic asset
-            spinning_wheel_gif = "https://giphy.com"
+            spinning_wheel_gif = "https://discordapp.net"
+
             
             embed.description += (
                 f"🎰 **THE WHEEL IS SPINNING AT MAXIMUM SPEEDS!**\n"
@@ -2278,7 +2279,6 @@ async def roulette(ctx, mode: str):
 
     view = CardRouletteView(ctx.author, cost, weighted_pool, mode)
     view.message = await ctx.send(embed=view.make_roulette_embed(), view=view)
-
 
 # --- Start Services ---
 if __name__ == "__main__":
