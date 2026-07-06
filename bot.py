@@ -2139,7 +2139,7 @@ async def gauntlet(ctx, wager: int):
     view.message = await ctx.send(embed=view.make_game_embed(), view=view)
 
 # ==============================================================================
-# --- STABLE CARD ROULETTE ENGINE ---
+# --- PERFORMANCE ANIMATED CARD ROULETTE ENGINE ---
 # ==============================================================================
 
 class CardRouletteView(discord.ui.View):
@@ -2152,22 +2152,23 @@ class CardRouletteView(discord.ui.View):
         self.is_stopped = False
         self.message = None
 
-    def make_roulette_embed(self, title_text="⚡ ROULETTE WHEEL SPINNING...", final_result=""):
+    def make_roulette_embed(self, title_text="🎡 PRIZE WHEEL ACTIVE...", final_result=""):
         embed = discord.Embed(title=title_text, color=0x3498db)
         embed.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n"
         
         if not self.is_stopped:
-            # FIXED animation: Displays a safe, moving emoji tape string instead of spam-editing the message API
-            flashing_strips = [
-                "⏩ [ 🟦 🟪 ❓ 🟩 🔮 👑 🔥 🌋 ] ⏩",
-                "⏩ [ 🌋 🟦 🟪 ❓ 🟩 🔮 👑 🔥 ] ⏩",
-                "⏩ [ 🔥 🌋 🟦 🟪 ❓ 🟩 🔮 👑 ] ⏩"
-            ]
-            embed.description += f"🎰 **THE WHEEL IS WHIRLING:**\n`{random.choice(flashing_strips)}`\n\n*Click the big blue button below immediately to stop the deck split markers!*"
+            # High-speed continuous looping spinning wheel graphic asset
+            spinning_wheel_gif = "https://giphy.com"
+            
+            embed.description += (
+                f"🎰 **THE WHEEL IS SPINNING AT MAXIMUM SPEEDS!**\n"
+                f"💥 *Mashing the blue button below instantly forces the braking system to split the active prize deck!*"
+            )
+            embed.set_image(url=spinning_wheel_gif)
             embed.set_footer(text="⏱️ Tap STOP right now to lock in your prize card location!")
         else:
             embed.description += f"{final_result}\n\n"
-            embed.set_footer(text="Game finished. Open another roulette matrix to spin again!")
+            embed.set_footer(text="Game finished. Spin again to push your luck!")
             
         return embed
 
@@ -2196,7 +2197,7 @@ class CardRouletteView(discord.ui.View):
         }
         winnings = payout_map.get(rarity, 0)
         
-        # Credit wallet balance ledger records
+        # Credit user wallet with flat winnings payout
         DATA["users"][u_id_str]["coins"] += winnings
         save_data()
         
@@ -2208,19 +2209,19 @@ class CardRouletteView(discord.ui.View):
         else:
             result_string = f"💀 **BUSTED!** The wheel click-clacked down onto an **AVERAGE** card sector.\n💰 **Winnings Payout:** `0` coins returned. Better luck next spin!"
 
-        embed = discord.Embed(title="🏁 CARD ROULETTE SETTLED", color=r_color)
-        embed.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n{result_string}"
+        embed_final = discord.Embed(title="🏁 CARD ROULETTE SETTLED", color=r_color)
+        embed_final.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n{result_string}"
         
-        embed.add_field(
+        embed_final.add_field(
             name=f"{r_emoji} TARGET LANDED",
             value=f"```\nNAME:    {card['name'].upper()}\nOVERALL: {card['overall']} OVR\nRARITY:  {card['rarity']}\nCARD ID: {chosen_id}\n```",
             inline=False
         )
         
         if card.get("image_url"):
-            embed.set_thumbnail(url=card["image_url"])
+            embed_final.set_image(url=card["image_url"])
             
-        await interaction.response.edit_message(embed=embed, view=None)
+        await interaction.response.edit_message(embed=embed_final, view=None)
 
     async def on_timeout(self):
         if not self.is_stopped:
@@ -2232,7 +2233,7 @@ class CardRouletteView(discord.ui.View):
             except Exception: pass
 
 
-@bot.hybrid_command(name="roulette", description="Spend coins on a high speed card roulette flashing wheel")
+@bot.hybrid_command(name="roulette", description="Spend coins on a card roulette flashing wheel animation")
 @app_commands.choices(mode=[
     app_commands.Choice(name="Standard Wheel (25 coins) - Basic Drop Rates", value="Standard"),
     app_commands.Choice(name="High-Roll Wheel (50 coins) - No Average Cards / Better Odds!", value="High-Roll")
@@ -2248,7 +2249,6 @@ async def roulette(ctx, mode: str):
     if DATA["users"][u_id_str]["coins"] < cost:
         return await ctx.send(f"❌ Store Error: Insufficient coins. A {mode} spin costs `{cost}` coins (Your wallet: `{DATA['users'][u_id_str]['coins']}`).")
 
-    # Deduct funds out of memory tracks upfront
     DATA["users"][u_id_str]["coins"] -= cost
     save_data()
 
@@ -2278,6 +2278,7 @@ async def roulette(ctx, mode: str):
 
     view = CardRouletteView(ctx.author, cost, weighted_pool, mode)
     view.message = await ctx.send(embed=view.make_roulette_embed(), view=view)
+
 
 # --- Start Services ---
 if __name__ == "__main__":
