@@ -2138,117 +2138,111 @@ async def gauntlet(ctx, wager: int):
     view.message = await ctx.send(embed=view.make_game_embed(), view=view)
 
 # ==============================================================================
-# --- PERFORMANCE SPEED TEXT TICKER ROULETTE ENGINE ---
+# --- PERFORMANCE 8-SECTOR MYSTERY BOX REVEAL ENGINE ---
 # ==============================================================================
 
-class CardRouletteView(discord.ui.View):
+class MysteryBoxView(discord.ui.View):
     def __init__(self, player, wager, pool, wheel_type):
-        super().__init__(timeout=45.0)
+        super().__init__(timeout=60.0)
         self.player = player
         self.wager = wager
-        self.pool = pool 
+        self.pool = pool
         self.wheel_type = wheel_type
-        self.is_stopped = False
         self.message = None
-
-    def make_roulette_embed(self, title_text="🎰 ROULETTE WHEEL ACTIVE...", ticker_line=""):
-        embed = discord.Embed(title=title_text, color=0x3498db)
-        embed.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n"
         
-        if not self.is_stopped:
-            # Displays the real-time calculated sliding text sequence tape bar frame
-            current_ticker = ticker_line if ticker_line else "⚡ [  🟦  🟪  🟩  🔮  👑  🔥  🌋  🌟  ]"
-            embed.description += (
-                f"🎰 **THE WHEEL IS WHIRLING AT HIGH SPEEDS:**\n"
-                f"```\n{current_ticker}\n```\n"
-                f"💥 *Mashing the blue button below instantly forces the braking system to split the active prize deck!*"
+        # Dynamically generate 8 numbered gift package buttons (2 rows of 4)
+        for box_num in range(1, 9):
+            btn = discord.ui.Button(
+                label=f"🎁 Box {box_num}", 
+                style=discord.ButtonStyle.secondary, 
+                custom_id=str(box_num),
+                row=0 if box_num <= 4 else 1
             )
-            embed.set_footer(text="⏱️ Tap STOP right now to lock in your prize card location!")
-        return embed
+            btn.callback = self.box_click_callback
+            self.add_item(btn)
 
-    async def animate_ticker_start(self):
-        """Generates an initial high-speed real-time sliding text illusion safely within rate limits."""
-        frames = [
-            "⚡ [ ➡️🟦  🟪  🟩  🔮  👑  🔥  🌋  🌟 ]",
-            "⚡ [  🟦  ➡️🟪  🟩  🔮  👑  🔥  🌋  🌟 ]",
-            "⚡ [  🟦  🟪  ➡️🟩  🔮  👑  🔥  🌋  🌟 ]",
-            "⚡ [  🟦  🟪  🟩  ➡️🔮  👑  🔥  🌋  🌟 ]",
-            "⚡ [  🟦  🟪  🟩  🔮  ➡️👑  🔥  🌋  🌟 ]"
-        ]
-        # Loops frames rapidly on boot up sequence tracks
-        for frame in frames:
-            if self.is_stopped: 
-                break
-            try:
-                await self.message.edit(embed=self.make_roulette_embed(ticker_line=frame), view=self)
-                await asyncio.sleep(0.2) # Fast 200ms refresh rate tick
-            except Exception:
-                break
-
-    @discord.ui.button(label="🛑 STOP THE WHEEL!", style=discord.ButtonStyle.primary, row=0)
-    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def box_click_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.player.id:
-            return await interaction.response.send_message("❌ This roulette table belongs to another user.", ephemeral=True)
+            return await interaction.response.send_message("❌ This prize selection matrix belongs to another player.", ephemeral=True)
             
-        if self.is_stopped:
-            return await interaction.response.defer()
-
-        self.is_stopped = True
+        # Instantly lock down the interaction panel grid from spam clicks
         self.clear_items()
         self.stop()
         
         u_id_str = str(self.player.id)
+        chosen_box = int(interaction.data["custom_id"])
         
-        # Settles the random drawing instantly the dynamic millisecond they hit stop
-        chosen_id = random.choice(self.pool)
-        card = DATA["global_cards"][chosen_id]
-        rarity = card["rarity"]
-        
+        # Payout values registry matching your specific requirements
         payout_map = {
             "Average": 0, "Great": 10, "Epic": 25, "Insane": 75,
             "Pro": 125, "Juggernaut": 175, "Otherworldly": 250, "Specialty": 500
         }
+        
+        # Draw 8 cards from the weighted pool (1 for each box on the table)
+        box_allocations = {}
+        for b_idx in range(1, 9):
+            box_allocations[b_idx] = random.choice(self.pool)
+            
+        # Extract the winner's specific target card asset
+        winning_id = box_allocations[chosen_box]
+        winning_card = DATA["global_cards"][winning_id]
+        rarity = winning_card["rarity"]
         winnings = payout_map.get(rarity, 0)
         
+        # Credit player profile balance ledger records
         DATA["users"][u_id_str]["coins"] += winnings
         save_data()
         
+        # Format the ghost boxes reveal summary ledger table
+        reveal_lines = []
+        for b_idx, cid in box_allocations.items():
+            c = DATA["global_cards"][cid]
+            emoji = get_rarity_emoji(c["rarity"])
+            if b_idx == chosen_box:
+                reveal_lines.append(f"▶️ **Box #{b_idx}: [ {emoji} {c['name'].upper()} ]** 📍 *Your Pick!*")
+            else:
+                reveal_lines.append(f"📁 Box #{b_idx}: {emoji} {c['name']} ({c['overall']} OVR)")
+                
+        reveal_board_table = "\n".join(reveal_lines)
+        
+        # Build the final stylized presentation card
         r_color = RARITY_COLORS.get(rarity, 0x3498db)
         r_emoji = get_rarity_emoji(rarity)
         
         if winnings > 0:
-            result_string = f"🎉 **JACKPOT SECTOR HIT!** The wheel click-clacked down onto a **{rarity.upper()}** prize!\n💰 **Winnings Payout Credited:** `+{winnings}` coins deposited! 🪙"
+            status_text = f"🎉 **BOX #{chosen_box} JACKPOT UNLOCKED!**\nYou unboxed a **{rarity.upper()}** card!\n💰 **Winnings Payout Credited:** `+{winnings}` coins deposited! 🪙"
         else:
-            result_string = f"💀 **BUSTED!** The wheel click-clacked down onto an **AVERAGE** card sector.\n💰 **Winnings Payout:** `0` coins returned. Better luck next spin!"
+            status_text = f"💀 **BOX #{chosen_box} WAS A BUST!**\nYou unboxed an **AVERAGE** card tier sector.\n💰 **Winnings Payout:** `0` coins added. Better luck next draft!"
 
-        embed_final = discord.Embed(title="🏁 CARD ROULETTE SETTLED", color=r_color)
-        embed_final.description = f"👤 **Player:** {self.player.mention}\n🎡 **Wheel Mode:** `{self.wheel_type} Wheel`\n💰 **Spin Cost:** `{self.wager}` coins 🪙\n\n{result_string}"
+        embed = discord.Embed(title=f"📦 {self.wheel_type.upper()} REVEAL SUMMARY", color=r_color)
+        embed.description = f"👤 **Player:** {self.player.mention}\n💰 **Box Cost:** `{self.wager}` coins\n\n{status_text}\n\n"
         
-        embed_final.add_field(
-            name=f"{r_emoji} TARGET LANDED",
-            value=f"```\nNAME:    {card['name'].upper()}\nOVERALL: {card['overall']} OVR\nRARITY:  {card['rarity']}\nCARD ID: {chosen_id}\n```",
+        embed.add_field(
+            name=f"{r_emoji} YOUR CARD REWARD",
+            value=f"```\nNAME:    {winning_card['name'].upper()}\nOVERALL: {winning_card['overall']} OVR\nRARITY:  {winning_card['rarity']}\nCARD ID: {winning_id}\n```",
             inline=False
         )
         
-        if card.get("image_url"):
-            embed_final.set_image(url=card["image_url"])
+        embed.add_field(name="👁️ Ghost Box Manifesto (What was inside the others)", value=reveal_board_table, inline=False)
+        embed.add_field(name="🏦 Updated Wallet Balance", value=f"`{DATA['users'][u_id_str]['coins']}` coins 🪙", inline=False)
+        
+        if winning_card.get("image_url"):
+            embed.set_image(url=winning_card["image_url"])
             
-        await interaction.response.edit_message(embed=embed_final, view=None)
+        await interaction.response.edit_message(embed=embed, view=None)
 
     async def on_timeout(self):
-        if not self.is_stopped:
-            self.is_stopped = True
-            self.clear_items()
-            try:
-                embed = discord.Embed(title="⏳ Roulette Timeout", description=f"{self.player.mention}, you took too long to hit STOP. The wheel locked up and the entry cost was lost.", color=discord.Color.red())
-                await self.message.edit(embed=embed, view=None)
-            except Exception: pass
+        self.clear_items()
+        try:
+            embed = discord.Embed(title="⏳ Box Left Unopened", description=f"{self.player.mention}, you took too long to pick a gift box target. The arena room closed down and your wager spent was forfeited.", color=discord.Color.red())
+            await self.message.edit(embed=embed, view=None)
+        except Exception: pass
 
 
-@bot.hybrid_command(name="roulette", description="Spend coins on a card roulette flashing wheel animation")
+@bot.hybrid_command(name="roulette", description="Wager coins to open 1 of 8 secret mystery gift box packages")
 @app_commands.choices(mode=[
-    app_commands.Choice(name="Standard Wheel (25 coins) - Basic Drop Rates", value="Standard"),
-    app_commands.Choice(name="High-Roll Wheel (50 coins) - No Average Cards / Better Odds!", value="High-Roll")
+    app_commands.Choice(name="Standard Mystery Box (25 coins) - Basic Drop Rates", value="Standard"),
+    app_commands.Choice(name="High-Roll Mystery Box (50 coins) - No Average Cards!", value="High-Roll")
 ])
 async def roulette(ctx, mode: str):
     if not DATA["global_cards"]: 
@@ -2259,14 +2253,16 @@ async def roulette(ctx, mode: str):
     
     cost = 25 if mode == "Standard" else 50
     if DATA["users"][u_id_str]["coins"] < cost:
-        return await ctx.send(f"❌ Store Error: Insufficient coins. A {mode} spin costs `{cost}` coins (Your wallet: `{DATA['users'][u_id_str]['coins']}`).")
+        return await ctx.send(f"❌ Store Error: Insufficient funds. Opening a {mode} Box costs `{cost}` coins (Your wallet: `{DATA['users'][u_id_str]['coins']}`).")
 
+    # Deduct box purchase entry fee upfront safely from memory tracks
     DATA["users"][u_id_str]["coins"] -= cost
     save_data()
 
     all_card_ids = list(DATA["global_cards"].keys())
     weighted_pool = []
 
+    # Map probability densities based on Selected Box Mode
     for cid in all_card_ids:
         r = DATA["global_cards"][cid]["rarity"]
         if mode == "Standard":
@@ -2286,13 +2282,13 @@ async def roulette(ctx, mode: str):
             else: weighted_pool.append(cid)
 
     if not weighted_pool:
-        return await ctx.send("❌ Configuration Error: No cards found matching this wheel's drop rules.")
+        return await ctx.send("❌ Configuration Error: No cards found matching this room's drop rules.")
 
-    view = CardRouletteView(ctx.author, cost, weighted_pool, mode)
-    view.message = await ctx.send(embed=view.make_roulette_embed(), view=view)
+    embed = discord.Embed(title=f"🎁 {mode.upper()} MYSTERY BOXES ARRIVED", color=0xCD7F32)
+    embed.description = f"👤 **Player:** {ctx.author.mention}\n💰 **Purchase Fee:** `{cost}` coins 🪙\n\n*Eight secret prize crates have dropped into the arena lanes! Click exactly **ONE** of the numbered grid buttons below to open your package and claim your card prize!*"
     
-    # Safely fires the background layout thread runner tasks
-    bot.loop.create_task(view.animate_ticker_start())
+    view = MysteryBoxView(ctx.author, cost, weighted_pool, mode)
+    view.message = await ctx.send(embed=embed, view=view)
 
 # --- Start Services ---
 if __name__ == "__main__":
