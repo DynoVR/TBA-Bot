@@ -2239,7 +2239,7 @@ class MysteryBoxView(discord.ui.View):
         except Exception: pass
 
 
-@bot.hybrid_command(name="roulette", description="Wager coins to open 1 of 8 secret mystery gift box packages")
+@bot.hybrid_command(name="coinbox", description="Wager coins to open 1 of 8 secret mystery gift box packages")
 @app_commands.choices(mode=[
     app_commands.Choice(name="Standard Mystery Box (25 coins) - Basic Drop Rates", value="Standard"),
     app_commands.Choice(name="High-Roll Mystery Box (50 coins) - No Average Cards!", value="High-Roll")
