@@ -2174,7 +2174,7 @@ class MysteryBoxView(discord.ui.View):
         
         # Payout values registry matching your specific requirements
         payout_map = {
-            "Average": 0, "Great": 10, "Epic": 25, "Insane": 75,
+            "Average": 0, "Great": 5, "Epic": 20, "Insane": 50,
             "Pro": 100, "Juggernaut": 150, "Otherworldly": 250, "Specialty": 500
         }
         
