@@ -2266,19 +2266,19 @@ async def roulette(ctx, mode: str):
     for cid in all_card_ids:
         r = DATA["global_cards"][cid]["rarity"]
         if mode == "Standard":
-            if r == "Average": weighted_pool.extend([cid] * 15)
-            elif r == "Great": weighted_pool.extend([cid] * 10)
-            elif r == "Epic": weighted_pool.extend([cid] * 6)
-            elif r == "Insane": weighted_pool.extend([cid] * 4)
+            if r == "Average": weighted_pool.extend([cid] * 30)
+            elif r == "Great": weighted_pool.extend([cid] * 25)
+            elif r == "Epic": weighted_pool.extend([cid] * 15)
+            elif r == "Insane": weighted_pool.extend([cid] * 10)
             elif r == "Pro": weighted_pool.extend([cid] * 2)
             else: weighted_pool.append(cid)
         elif mode == "High-Roll":
             if r == "Average": continue 
-            elif r == "Great": weighted_pool.extend([cid] * 8)
-            elif r == "Epic": weighted_pool.extend([cid] * 6)
-            elif r == "Insane": weighted_pool.extend([cid] * 5)
-            elif r == "Pro": weighted_pool.extend([cid] * 3)
-            elif r == "Juggernaut": weighted_pool.extend([cid] * 2)
+            elif r == "Great": weighted_pool.extend([cid] * 30)
+            elif r == "Epic": weighted_pool.extend([cid] * 25)
+            elif r == "Insane": weighted_pool.extend([cid] * 15)
+            elif r == "Pro": weighted_pool.extend([cid] * 10)
+            elif r == "Juggernaut": weighted_pool.extend([cid] * 5)
             else: weighted_pool.append(cid)
 
     if not weighted_pool:
