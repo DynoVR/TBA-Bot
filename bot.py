@@ -2175,7 +2175,7 @@ class MysteryBoxView(discord.ui.View):
         # Payout values registry matching your specific requirements
         payout_map = {
             "Average": 0, "Great": 10, "Epic": 25, "Insane": 75,
-            "Pro": 125, "Juggernaut": 175, "Otherworldly": 250, "Specialty": 500
+            "Pro": 100, "Juggernaut": 150, "Otherworldly": 250, "Specialty": 500
         }
         
         # Draw 8 cards from the weighted pool (1 for each box on the table)
